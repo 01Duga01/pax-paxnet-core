@@ -51,7 +51,7 @@ Read this once and everything after will make sense. Every term is explained in 
 - **Guest**: A player who entered someone else's room by invitation. Guests are numbered `2`, `3`, `4`… in order of arrival. *Came by invitation.*
 - **Room**: A place on the relay where the host and guests meet. It exists while the host is in the game.
 - **Room code**: 4 to 12 characters with no look-alike letters (no `0`, `O`, `1`, `I`). For example `D3EF5YXQ`. Case does not matter. The relay knows the code too: it uses it to find the room. *The post office address.*
-- **Invite PIN**: 12 characters from the same alphabet, for example `K7M2P9QXA4HV`. The host creates it when the room opens. The PIN is never sent to the relay: it makes sure nobody in the middle can swap the encryption keys. *A door password only insiders know.*
+- **Invite PIN**: 24 characters from the same alphabet, for example `K7M2P9QXA4HVF3D8WNQ5TZ6B`. The first 12 are secret: the host lets in only those who know them. The last 12 are a fingerprint of the host's public key: the guest checks the host's key against the invite and will not talk to a substituted key. The PIN is never sent to the relay. *A door password and a seal on it.*
 - **Invite**: A link with the code and PIN: `https://mp.paxuniverse.ru/j/CODE#PIN`. The short form `CODE#PIN` works too. Send it to a friend in a messenger, whole.
 - **Relay**: The game server all messages go through. Pax Universe itself provides it via `Network.relay_pipe()`. *The mail sorting centre.*
 - **Game / session**: Your whole online game: room, players, messages. In code it is the `Session` node.
@@ -280,8 +280,8 @@ All code on this page is written for Godot 4.7 with strict typing, as in the gam
     | Who    | What to type                       | What happens                                                                                                                         |
     |--------|------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
     | Host   | `hello host`                       | "Opening the room…". The room is ready in 1-2 seconds.                                                                               |
-    | Host   | `hello code`                       | An invite link with the PIN, for example `https://mp.paxuniverse.ru/j/D3EF5YXQ#K7M2P9QXA4HV`. Send it to a friend, whole.            |
-    | Friend | `hello join D3EF5YXQ#K7M2P9QXA4HV` | The friend enters the room; the host sees "Player joined the game". Pasting the whole link works too. Without the PIN joining fails. |
+    | Host   | `hello code`                       | An invite link with the PIN, for example `https://mp.paxuniverse.ru/j/D3EF5YXQ#K7M2P9QXA4HVF3D8WNQ5TZ6B`. Send it to a friend, whole.            |
+    | Friend | `hello join D3EF5YXQ#K7M2P9QXA4HVF3D8WNQ5TZ6B` | The friend enters the room; the host sees "Player joined the game". Pasting the whole link works too. Without the PIN joining fails. |
     | Anyone | `hello say Hi!`                    | Everyone else sees "Player: Hi!".                                                                                                    |
     | Anyone | `hello leave`                      | Leave. If the host leaves, guests see "The host closed the game".                                                                    |
 
@@ -364,7 +364,7 @@ func get_paxnet() -> Node:
 | rng(seed, tick = 0, stream = "") → RefCounted   | A random generator identical for all players. Methods: frand(), irange(a, b), chance(p), pick(arr), next_u32().                                                                                                         | `lib.rng(seed, turn, "my_mod/dice")`                   |
 | state_hash(value) → int                         | A 32-bit fingerprint of a value, independent of dictionary key order. For sync checks.                                                                                                                                  | `lib.state_hash(world)`                                |
 | parse_code(text) → String                       | The room code from whatever the player typed: a code, PAX-…, a link (anything after "#" is ignored). "" means it is not a code.                                                                                         | `lib.parse_code("pax-d3ef5yxq")`                       |
-| parse_pin(text) → String                        | The PIN from an invite like `CODE#PIN` or a link. "" if there is no PIN or it is malformed (not 12 alphabet characters).                                                                                                | `lib.parse_pin("D3EF5YXQ#K7M2P9QXA4HV")`               |
+| parse_pin(text) → String                        | The PIN from an invite like `CODE#PIN` or a link. "" if there is no PIN or it is malformed (not 24 alphabet characters).                                                                                                | `lib.parse_pin("D3EF5YXQ#K7M2P9QXA4HVF3D8WNQ5TZ6B")`               |
 | invite_link(code, pin = "") → String            | Invite link for a code. If pin is given, it is appended after "#".                                                                                                                                                      | `lib.invite_link("D3EF5YXQ", pin)`                     |
 | shared_code(seed, stream, prefix = "") → String | A room code that is the same for everyone with the same seed and stream. 8 characters total; prefix is up to 4 characters at the start. Such rooms need `pinned: false`, see recipe 4.                                  | `lib.shared_code(lib.utc_day(), "my_mod/daily", "MM")` |
 | utc_day() → int                                 | The current UTC day number: the same for every player in the world.                                                                                                                                                     | `lib.utc_day()`                                        |
@@ -387,7 +387,7 @@ Tags: \[host\] works only on the host, \[guest\] only on a guest, \[both\] on ev
 | Method                                                  | Who       | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Example                                      |
 |---------------------------------------------------------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
 | host(name, adapter = null, cfg = {}) → String           | \[host\]  | Open a room. name: the player name everyone will see. adapter: only for world sync, otherwise null. cfg: [room settings](#room-settings). Returns "" if opening has started, or an error code. The room code and PIN appear in 1-2 seconds (the room event, status lobby).                                                                                                                                                                                          | `net.host("Anna")`                           |
-| join(target, name, adapter = null, extra = {}) → String | \[guest\] | Join by invite: `CODE#PIN`, "PAX-CODE#PIN" or a link with the PIN. Returns "" (joining, wait for status lobby) or an error code: "code" if the input is clearly not a code, "relay" if the relay channel did not open. If no room has that code, you find out later: the failed("code") signal fires. If the PIN is missing or wrong, the handshake silently fails and after 8 seconds failed("no_route") arrives. extra.mods is compared with the host's cfg.mods. | `net.join("D3EF5YXQ#K7M2P9QXA4HV", "Boris")` |
+| join(target, name, adapter = null, extra = {}) → String | \[guest\] | Join by invite: `CODE#PIN`, "PAX-CODE#PIN" or a link with the PIN. Returns "" (joining, wait for status lobby) or an error code: "code" if the input is clearly not a code, "relay" if the relay channel did not open. If no room has that code, you find out later: the failed("code") signal fires. If the PIN is missing or wrong, the handshake silently fails and after 8 seconds failed("no_route") arrives. If the host's key does not match the fingerprint in the invite, failed("pin") arrives and the secret is never sent to the host. extra.mods is compared with the host's cfg.mods. | `net.join("D3EF5YXQ#K7M2P9QXA4HVF3D8WNQ5TZ6B", "Boris")` |
 | start() → Dictionary                                    | \[host\]  | Start the game: status playing, guests receive the world (or an empty world if there is no adapter). Returns {ok, code}. Optional if your mod has no "start".                                                                                                                                                                                                                                                                                                       | `net.start()`                                |
 | leave()                                                 | \[both\]  | Leave. A guest says goodbye to the host. The host says goodbye to everyone and closes the room. Called automatically when the node is freed.                                                                                                                                                                                                                                                                                                                        | `net.leave()`                                |
 | rejoin() → String                                       | \[guest\] | Join again after a connection error (status failed): same key, same seat, same PIN.                                                                                                                                                                                                                                                                                                                                                                                 | `net.rejoin()`                               |
@@ -406,9 +406,11 @@ Tags: \[host\] works only on the host, \[guest\] only on a guest, \[both\] on ev
 | Method                                | Who      | What it does                                                                                                                                                                                                          | Example                                         |
 |---------------------------------------|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------|
 | set_ready(on)                         | \[both\] | The "ready" mark.                                                                                                                                                                                                     | `net.set_ready(true)`                           |
-| choose_seat(seat, as_coruler = false) | \[both\] | Take a seat (country, side) by number from the adapter's countries(). If the seat is taken nothing changes: check players() after the changed signal. On the host, lobby_cmd returns {ok: false, code: "seat_taken"}. | `net.choose_seat(0)`                            |
+| choose_seat(seat, as_coruler = false) | \[both\] | Take a seat (country, side) by number from the adapter's countries(). If the seat is taken nothing changes: check players() after the changed signal. On the host, lobby_cmd returns {ok: false, code: "seat_taken"}. A player becomes a co-ruler (as_coruler = true) only by the seat owner's invite (`invite_coruler`). | `net.choose_seat(0)`                            |
 | chat(text)                            | \[both\] | A chat line to everyone (up to 300 characters). Arrives in the adapter's on_chat. For your own chat, send/broadcast is simpler.                                                                                       | `net.chat("gg")`                                |
 | kick(id)                              | \[host\] | Kick a player: they see "The host removed you from the game".                                                                                                                                                         | `net.kick(3)`                                   |
+| invite_coruler(guest_id)              | \[both\]  | The seat owner invites a player to be a co-ruler. Without an invite nobody can take another player's seat as co-ruler. | `net.invite_coruler(3)` |
+| revoke_coruler(guest_id)              | \[both\]  | Withdraw the invite and, if the player is already a co-ruler, remove them from the seat. | `net.revoke_coruler(3)` |
 | lobby_cmd(cmd) → Variant              | \[both\] | Any lobby command: {op: "seat"\|"ready"\|"name"\|"rules"\|"kick"\|"start", …}. rules is host-only: time_mode, join_in_progress, ready_required, allow_coruler, max_players.                                           | `net.lobby_cmd({"op": "name", "name": "Anna"})` |
 
 ### Game time
@@ -451,7 +453,7 @@ Tags: \[host\] works only on the host, \[guest\] only on a guest, \[both\] on ev
 | `reopening`                      | host  | The relay lost the room; reopening it with the same code and PIN | `{try}`                                                               |
 | `relay_error`                    | host  | The relay did not give a room                                    | `{code, why}`                                                         |
 | `peer_joined`                    | host  | A player joined or returned                                      | `{id, name, reconnect, mode}`                                         |
-| `peer_left`                      | host  | A player left or vanished (their seat is held)                   | `{id, why}`; why: `bye`, `timeout`, `kicked`, `app_rate`, `app_abuse` |
+| `peer_left`                      | host  | A player left or vanished (their seat is held)                   | `{id, why}`; why: `bye`, `timeout`, `kicked`, `app_rate`, `app_abuse`, `lag` |
 | `lobby`                          | both  | The lobby was updated                                            | the whole lobby state                                                 |
 | `started`                        | host  | The game started                                                 | `{}`                                                                  |
 | `world_sent` / `world_delivered` | host  | World sent to a guest / the guest assembled it                   | `{id, …}`                                                             |
@@ -514,6 +516,13 @@ These values cap what a single guest can do, so that one guest cannot overload t
 | `resync_gap_ms`    | `250`             | The host listens to a section-healing request at most once per this many milliseconds.         |
 | `resync_burst`     | `6`               | How many healing requests in a row are allowed.                                                |
 | `resync_refill_ms` | `5000`            | One request returns to the budget every this many milliseconds.                                |
+| `lag_kick_ms`      | `15000`           | How many milliseconds a player may hold up world steps (lagging, silent or lying in reports) before the host cuts its link. After three such cases entry is closed for a minute. |
+| `max_lobby_cmd_bytes` | `1024`         | The longest lobby command from a guest before parsing, in bytes. |
+| `max_chat_bytes`   | `2048`            | The longest chat line from a guest before parsing, in bytes. |
+| `max_time_cmd_bytes` | `256`           | The longest time command from a guest before parsing, in bytes. |
+| `max_resync_bytes` | `8192`            | The longest healing request before parsing, in bytes. |
+| `max_frag_bytes`   | `8388608` (8 MB)  | The largest message assembled from chunks. |
+| `max_roster`       | `0`               | How many distinct players the host remembers per game. 0 means `max_players * 4`, at least 16. |
 
 ## What you can send
 
@@ -561,7 +570,7 @@ func _on_failed(code: String) -> void:
 
 > **Where errors arrive.**
 >
-> Connection and join errors (`code`, `full`, `relay`, `timeout`, `host_left`, `kicked`, `version`, `mods`, `started`, `no_route`, `desync`) arrive in the `failed` signal. Refusals of individual actions (`illegal`, `host_only`, `rate`) do not break the game: they arrive in your adapter's `on_notice` method and in the `action_rejected` event.
+> Connection and join errors (`code`, `full`, `relay`, `timeout`, `host_left`, `kicked`, `version`, `mods`, `started`, `no_route`, `pin`, `desync`) arrive in the `failed` signal. Refusals of individual actions (`illegal`, `host_only`, `rate`) do not break the game: they arrive in your adapter's `on_notice` method and in the `action_rejected` event.
 
 | Code         | When it happens                                                                                                                                                        | What the player sees                                            | What to do                                                                                   |
 |--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------|----------------------------------------------------------------------------------------------|
@@ -581,6 +590,7 @@ func _on_failed(code: String) -> void:
 | `bad_packet` | Reserved: corrupted packets are dropped silently.                                                                                                                      | Corrupted data arrived.                                         | If it happens again, rejoin.                                                                 |
 | `desync`     | The world could not be installed: the adapter's install_world returned false.                                                                                          | Your world diverged from the host's and did not heal by itself. | Click "Rejoin" and the world will arrive again in a few seconds.                             |
 | `no_route`   | The handshake with the host did not complete within 8 seconds. Most often the guest joined without the PIN or with a wrong one: the host silently drops such attempts. | The host is not responding.                                     | Check that the invite was copied whole, with the PIN (`CODE#PIN`), and click "Rejoin".       |
+| `pin`        | The host's key does not match the fingerprint in the invite: the connection may be intercepted, or the invite is left over from a previous game (the host's key is created anew at every launch). | The host's key does not match your invite. | Do not join. Ask the host for a fresh invite over a channel you trust. |
 | `relay`      | No Network.relay_pipe() in the game, or the relay refused or did not respond (the host waits 20 s, a guest 10 s).                                                      | The Pax Universe relay is unavailable.                          | Check your internet and game version and try again in a minute.                              |
 
 ## Ready-made solutions: copy and adapt
@@ -966,7 +976,11 @@ func add_point(player: String) -> void:
 
 ### Deals between players
 
-The core mailbox (letters of kind `war`, `peace`, `alliance`, `trade`, `coruler`, `letter`) checks trade deals twice: when the letter is sent and when the deal is executed. The amount (`terms.amount`) must be a number from zero up to 10<sup>12</sup>, and the giving side must have enough treasury (`can_afford`). A deal with a negative amount, which used to move money the wrong way, is now rejected with `illegal`.
+The core mailbox (letters of kind `war`, `peace`, `alliance`, `trade`, `coruler`, `letter`) checks trade deals twice: when the letter is sent and when the deal is executed. The amount (`terms.amount`) must be a number from zero up to 10<sup>12</sup>. A deal runs in two steps: the host asks the **giver** to debit the amount, the giver answers, and only after that confirmation does the recipient get the money. A confirmation is accepted once and only from the giver. A deal with a negative amount is rejected with `illegal`.
+
+> **Limit of the protection.**
+>
+> A guest's treasury lives on the guest and the host does not verify it. An honest client debits and confirms. A modified client can confirm a debit that never happened. Only a treasury check on the host side would stop that (this architecture has none), so in games that need to be cheat-proof, deals between players remain trust-based.
 
 ## A game in the world of Pax Universe itself
 
@@ -1091,7 +1105,15 @@ Pax Universe checks every mod **before** launch and refuses to run a mod that br
 |---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Someone on the network or the relay reads packets                                           | AES-128 encryption. They cannot be read.                                                                                                                                                                  |
 | Someone forges or replays packets                                                           | An HMAC signature on every packet; packet numbers drop replays.                                                                                                                                           |
-| The relay swaps the host's public key ("man in the middle")                                 | The PIN. Without it the middleman gets no working keys and its packets fail the signature check. Guessing the PIN (60 bits) during a game is not feasible.                                                |
+| The relay swaps the host's public key ("man in the middle") | The host key fingerprint inside the invite. The guest compares the key it receives with the fingerprint before sending the secret and refuses to join on a mismatch (`pin`). A key with a matching fingerprint (60 bits) cannot be produced, and there is nothing to brute-force the PIN against: the middleman never gets the secret. |
+| A guest stays silent or lies in progress reports and holds up world steps for everyone | Reports can neither go back nor look into the future, and a player who holds steps longer than `lag_kick_ms` is disconnected. |
+| A guest takes another player's country as co-ruler without consent | A co-ruler seat needs the seat owner's invite. The seat number is checked against the adapter's countries. |
+| A guest floods the host with time votes | A rate limit on time commands, at most 8 open votes, the value is coerced to a number, only players with a country vote. |
+| A guest sends huge or deeply nested structures | A size cap per message type before parsing, a parse budget by element count, nested chunks are forbidden. |
+| Many join attempts make the host do RSA | A shared RSA operation bucket, an address is refused after four failures in 10 seconds, a cap on remembered players. |
+| The relay mirrors a packet back to its sender | Signing and cipher keys differ per direction, so a packet returned to its sender fails verification. |
+| The relay replays old packets | A 32-bit packet number under the signature; packets older than a 32-packet window are dropped. |
+| A malicious host sends a guest a gigantic world or a section of the wrong shape | Size ceilings for transfers and the unpacked world, type checks of sections before applying. |
 | The host of another room or the relay wants to enter another room as you and take your seat | A host never receives your player key, only a key for that one room: `HMAC(player key, room code)`. In another room it is useless.                                                                        |
 | One guest floods the host with messages or giant "compression bombs"                        | A size cap after decompression (4 MB), a cap on number run-ahead, a per-guest rate and volume limit, a budget for section healing. The offender loses the link. See the [limit settings](#room-settings). |
 | A deal with a negative amount takes money from the recipient                                | The deal amount is checked on sending and on execution: a number from zero, within the cap, within the giver's treasury.                                                                                  |
@@ -1105,6 +1127,9 @@ Pax Universe checks every mod **before** launch and refuses to run a mod that br
 > - **The host sees everything.** Encryption runs between a player and the host. By definition the host decrypts everything sent to it and forwards it to the others.
 > - **Guard the invite.** Anyone who saw the invite together with the PIN (for example in a public chat) can join the room as an ordinary guest.
 > - **The raw channel** (`open_pipe`, recipe 6) bypasses PaxNet encryption: protect your own protocol yourself.
+> - **A guest's treasury and client honesty.** Money and other sections of a guest's country live on the guest. A modified client can lie about its treasury (see the section on deals).
+> - **A save file contains the PIN.** The host's save stores the room PIN so old invites keep working after a restart. The permanent player key no longer goes in. Do not publish a save while the room is still needed.
+> - **Discord.** If a mod shows the invite with the PIN in Discord status, Discord servers and everyone who sees the profile can see the PIN.
 > - **Lifetime.** RSA-1024 and AES-128 are chosen as light and sufficient for the duration of a game (hours, a day), not for years of stored recorded traffic.
 
 ## How PaxNet Core differs from PaxNet
@@ -1128,7 +1153,10 @@ PaxNet replaces the game's network service and opens a UDP port itself. That is 
 - **The invite PIN** protects against key swapping on the relay. An invite now looks like `CODE#PIN`; rooms without a PIN are enabled with the setting `pinned: false`.
 - **Per-room player key:** the host receives `HMAC(player key, room code)`, and seat events and the shared seat list keep only an irreversible tag.
 - **Message channel limits:** size after decompression, number window, per-guest rate and volume, healing budget. Settings: `app_*` and `resync_*`.
-- **Deals:** amount validation on sending and on execution, a new adapter method `can_afford`.
+- **Deals:** amount validation on sending and on execution, a new adapter method `can_afford`. Trade runs in two steps: the giver debits first, then the recipient is paid.
+- **Lag reports, co-ruler, time:** a player can neither stall the steps with a false report, nor take another country without an invite, nor flood votes.
+- **The link:** per-direction keys, 32-bit packet numbers, a 16-byte signature, the engine's native HMAC.
+- **A guest does not trust the host:** size ceilings and type checks for the incoming world.
 
 ### Other
 
@@ -1157,9 +1185,9 @@ You do not need to know this to use the library. The core protocol version is un
 #### Link packet
 
 ``` text
-0xA7 | conn u32 | flags u8 (bit 0: ack valid) | seq u16 | ack u16 | ack_bits u32     header (14 bytes), in the clear
+0xA7 | conn u32 | flags u8 (bit 0: ack valid) | seq u32 | ack u32 | ack_bits u32     header (18 bytes), in the clear
 IV (16 bytes, random) | AES-128-CBC( records… | padding to 16 bytes )                      ciphertext
-HMAC-SHA256 (8 bytes) over everything above                                                signature
+HMAC-SHA256 (16 bytes) over everything above                                                signature
 record: 1 reliable : varint id | u8 type | varint length | body
         2 slot     : u8 type | varint length | body   ("latest value")
         3 oneshot  : u8 type | varint length | body   (no retries: transfer chunks)
@@ -1171,7 +1199,7 @@ The signature is checked before decryption. The AES and signature keys are deriv
 
 ``` text
 guest → HELLO(version, nonce_c)                 padded to 400 bytes
-host  → CHALLENGE(nonce_c, window, cookie, host RSA public key)
+host  → CHALLENGE(nonce_c, window, cookie, host RSA public key)    the guest compares its fingerprint with the PIN, otherwise it refuses
                                                 cookie = HMAC(host secret, address | nonce_c | window)
 guest → CONNECT(nonce_c, window, cookie, secret under RSA, info under the secret)
         info: name, room key, mods, has world, last step, checksum
