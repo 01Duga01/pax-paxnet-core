@@ -17,7 +17,7 @@ func _mod_loaded() -> void:
 	var root: Window = Pax.get_tree().root
 	# F6 перезагружает код мода: старый узел библиотеки (и его партии) уходит
 	var old: Variant = root.get_meta(PaxNetLib.META, null)
-	if old is Node and is_instance_valid(old):
+	if is_instance_valid(old) and old is Node:
 		(old as Node).queue_free()
 	# версия библиотеки (и протокола) берётся из собственного mod.json: вручную её менять в коде не нужно
 	var own: Dictionary = PaxNetLib.read_manifest(self)

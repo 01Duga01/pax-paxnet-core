@@ -44,7 +44,7 @@ static func game_network(from: Node) -> Object:
 	if pax != null:
 		cands.append_array(pax.get_children())
 	for c in cands:
-		if c is Object and is_instance_valid(c) and (c as Object).has_method("relay_pipe"):
+		if is_instance_valid(c) and c is Object and (c as Object).has_method("relay_pipe"):
 			return c
 	return null
 
