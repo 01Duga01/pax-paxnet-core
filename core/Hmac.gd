@@ -2,8 +2,7 @@ extends RefCounted
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
-# HMAC-SHA256 на HashingContext: подпись пакетов и cookie рукопожатия. Шифрования нет — только
-# защита от чужих (не с пути пакета) подделок.
+# HMAC-SHA256: подпись пакетов и cookie рукопожатия (шифр пакетов - в Cipher.gd).
 
 const BLOCK := 64
 
@@ -15,22 +14,12 @@ static func _sha(data: PackedByteArray) -> PackedByteArray:
 	return h.finish()
 
 
+static var _crypto: Crypto = Crypto.new()
+
+
+# HMAC-SHA256 встроенной функцией движка (в разы быстрее своей на GDScript и не усиливает перегрузку хоста).
 static func mac(key: PackedByteArray, data: PackedByteArray) -> PackedByteArray:
-	if key.size() > BLOCK:
-		key = _sha(key)
-	var k := key.duplicate()
-	k.resize(BLOCK)   # добивается нулями
-	var ipad := PackedByteArray()
-	var opad := PackedByteArray()
-	ipad.resize(BLOCK)
-	opad.resize(BLOCK)
-	for i in BLOCK:
-		ipad[i] = k[i] ^ 0x36
-		opad[i] = k[i] ^ 0x5C
-	ipad.append_array(data)
-	var inner := _sha(ipad)
-	opad.append_array(inner)
-	return _sha(opad)
+	return _crypto.hmac_digest(HashingContext.HASH_SHA256, key, data)
 
 
 # Первые n байт подписи.

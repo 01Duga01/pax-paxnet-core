@@ -43,6 +43,32 @@ class Listener extends RefCounted:
 	var _entries := {}           # conn_id -> {link, endpoint, ctx}
 	var _by_endpoint := {}       # endpoint -> {nonce, accept, conn}
 	var _rng := RandomNumberGenerator.new()
+	# Дорогое (приватная операция RSA) ограничено: общее ведро и счётчик неудач на адрес.
+	var _rsa_tokens := 40.0
+	var _rsa_ms := 0
+	var _bad := {}               # endpoint -> [неудач, начало окна, мс]
+
+	func _rsa_allowed(endpoint: String, now_ms: int) -> bool:
+		var b: Array = _bad.get(endpoint, [0, now_ms])
+		if now_ms - int(b[1]) > 10000:
+			b = [0, now_ms]
+		if int(b[0]) >= 4:
+			return false
+		_rsa_tokens = minf(_rsa_tokens + float(now_ms - _rsa_ms) / 1000.0 * 20.0, 40.0)
+		_rsa_ms = now_ms
+		if _rsa_tokens < 1.0:
+			return false
+		_rsa_tokens -= 1.0
+		return true
+
+	func _fail(endpoint: String, now_ms: int) -> void:
+		if _bad.size() > 2048:
+			_bad.clear()
+		var b: Array = _bad.get(endpoint, [0, now_ms])
+		if now_ms - int(b[1]) > 10000:
+			b = [0, now_ms]
+		b[0] = int(b[0]) + 1
+		_bad[endpoint] = b
 
 	func _init() -> void:
 		_rng.randomize()
@@ -113,15 +139,20 @@ class Listener extends RefCounted:
 				if known != null and known["nonce"] == nonce_c2:
 					send_to.call(endpoint, known["accept"])   # ACCEPT потерялся
 					return
+				if not _rsa_allowed(endpoint, now_ms):
+					return
 				var sec := Cipher.unwrap_secret(rsa, wrapped)
 				if sec.is_empty():
+					_fail(endpoint, now_ms)
 					return
 				sec = Cipher.bind(sec, pin)
 				var plain = Cipher.open_mac(sec, "pax-hs-c", sealed_info)
 				if plain == null:
+					_fail(endpoint, now_ms)
 					return
 				var info = Bytes.R.new(plain).variant()
 				if not (info is Dictionary):
+					_fail(endpoint, now_ms)
 					return
 				var d: Dictionary = admit.call(endpoint, info, now_ms)
 				if not d.get("ok", false):
@@ -131,9 +162,10 @@ class Listener extends RefCounted:
 					_entries.erase(known["conn"])
 				var conn := 0
 				while conn == 0 or _entries.has(conn):
-					conn = _rng.randi()
+					conn = Cipher.random_bytes(4).decode_u32(0)
 				var key := Fr.link_key(cookie, nonce_c2, sec)
 				var link := UdpLink.new(conn, key)
+				link.set_role(true)
 				link.mtu = mtu
 				Fr.tune(link, link_tune)
 				var ent := {"link": link, "endpoint": endpoint, "ctx": d.get("ctx")}
@@ -245,6 +277,7 @@ class Dialer extends RefCounted:
 				var welcome = Bytes.R.new(plain).variant()
 				state = "connected"
 				link = UdpLink.new(conn, Fr.link_key(_cookie, _nonce, _secret))
+				link.set_role(false)
 				link.mtu = mtu
 				Fr.tune(link, link_tune)
 				link.send_fn = send_fn

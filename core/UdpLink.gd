@@ -13,7 +13,7 @@ extends RefCounted
 #                (пульс, пинг, статус), опоздавшее старое не отдаётся;
 #   oneshot    — одноразовое без повторов (куски больших передач: повтором занимается Xfer).
 #
-# Заголовок пакета: magic u8 | flags u8 (бит 0 — поле ack действительно) | conn u32 | seq u16 | ack u16 | ack_bits u32 (бит i — получен
+# Заголовок пакета: magic u8 | flags u8 (бит 0 — поле ack действительно) | conn u32 | seq u32 | ack u32 | ack_bits u32 (бит i — получен
 # пакет ack-1-i) | IV (16) | записи, зашифрованные AES-128-CBC (с дополнением до 16) | подпись HMAC-SHA256
 # (8 байт) по всему пакету. Ключи шифра и подписи выводятся из ключа звена (см. Cipher.gd); заголовок открыт.
 #
@@ -25,8 +25,8 @@ const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 const Cipher = preload("res://mods/paxnet_core/core/Cipher.gd")
 
 const MAGIC := 0xA7
-const HEADER := 14
-const TAG := 8
+const HEADER := 18              # magic 1 | conn 4 | flags 1 | seq 4 | ack 4 | ack_bits 4
+const TAG := 16
 const ENC_OVERHEAD := 32         # IV (16) + дополнение шифра (до 16)
 const REC_RELIABLE := 1
 const REC_SLOT := 2
@@ -34,7 +34,10 @@ const REC_ONESHOT := 3
 
 var conn_id := 0
 var key := PackedByteArray()
-var enc_key := PackedByteArray()
+var tx_key := PackedByteArray()      # подпись исходящих; у хоста и гостя разная (зеркалить пакет нельзя)
+var rx_key := PackedByteArray()
+var tx_enc := PackedByteArray()
+var rx_enc := PackedByteArray()
 var mtu := 1200
 var send_fn: Callable            # (PackedByteArray) -> void
 var on_message: Callable         # (type: int, body: PackedByteArray) -> void
@@ -79,7 +82,24 @@ var max_packets_per_poll := 6
 func _init(conn: int = 0, key_: PackedByteArray = PackedByteArray()) -> void:
 	conn_id = conn
 	key = key_
-	enc_key = Cipher.derive_aes(key_, "pax-pkt-enc")
+	set_role(false, false)
+
+
+## Ключи по направлениям: хост шлёт ключом s2c, гость c2s; пакет, возвращённый отправителю, не пройдёт проверку.
+## directional = false оставляет один общий ключ (тесты звена в одиночку).
+func set_role(is_server: bool, directional: bool = true) -> void:
+	if not directional:
+		tx_key = key
+		rx_key = key
+		tx_enc = Cipher.derive_aes(key, "pax-pkt-enc")
+		rx_enc = tx_enc
+		return
+	var out_dir := "s2c" if is_server else "c2s"
+	var in_dir := "c2s" if is_server else "s2c"
+	tx_key = Cipher.derive(key, "pax-mac-" + out_dir)
+	rx_key = Cipher.derive(key, "pax-mac-" + in_dir)
+	tx_enc = Cipher.derive_aes(key, "pax-enc-" + out_dir)
+	rx_enc = Cipher.derive_aes(key, "pax-enc-" + in_dir)
 
 
 func budget() -> int:
@@ -165,10 +185,10 @@ func receive(data: PackedByteArray, now_ms: int) -> void:
 		stats["bad_packets"] += 1
 		return
 	var sealed_end := data.size() - TAG
-	if not Hmac.equal(Hmac.tag(key, data.slice(0, sealed_end), TAG), data.slice(sealed_end)):
+	if not Hmac.equal(Hmac.tag(rx_key, data.slice(0, sealed_end), TAG), data.slice(sealed_end)):
 		stats["bad_packets"] += 1
 		return
-	var inner = Cipher.open(enc_key, data.slice(HEADER, sealed_end))
+	var inner = Cipher.open(rx_enc, data.slice(HEADER, sealed_end))
 	if inner == null:
 		stats["bad_packets"] += 1
 		return
@@ -180,8 +200,8 @@ func receive(data: PackedByteArray, now_ms: int) -> void:
 		stats["bad_packets"] += 1
 		return
 	var flags := r.u8()
-	var seq := r.u16()
-	var ack := r.u16()
+	var seq := r.u32()
+	var ack := r.u32()
 	var bits := r.u32()
 	if dead:
 		return
@@ -240,7 +260,7 @@ func _call(t: int, b: PackedByteArray) -> void:
 
 
 static func _seq_diff(a: int, b: int) -> int:
-	return ((a - b + 32768) & 0xFFFF) - 32768
+	return ((a - b + 0x80000000) & 0xFFFFFFFF) - 0x80000000
 
 
 func _is_dup(seq: int) -> bool:
@@ -261,7 +281,7 @@ func _is_dup(seq: int) -> bool:
 		return true
 	var d := -diff
 	if d > 32:
-		return false   # слишком старый — на уровне сообщений дубль всё равно отсеется
+		return true    # старше окна: считаем повтором (номер 32-битный, «круг» не наступит)
 	var bit := 1 << (d - 1)
 	if _recv_bits & bit:
 		return true
@@ -273,7 +293,7 @@ func _process_acks(ack: int, bits: int, now_ms: int) -> void:
 	var acked: Array = [ack]
 	for i in 32:
 		if bits & (1 << i):
-			acked.append((ack - 1 - i) & 0xFFFF)
+			acked.append((ack - 1 - i) & 0xFFFFFFFF)
 	for s in acked:
 		var rec = _sent.get(s)
 		if rec == null:
@@ -369,10 +389,10 @@ func _send_packet(now_ms: int) -> void:
 	var w := Bytes.W.new()
 	w.u8(MAGIC).u32(conn_id).u8(1 if _recv_hi >= 0 else 0)
 	var seq := _seq
-	_seq = (_seq + 1) & 0xFFFF
-	w.u16(seq)
+	_seq = (_seq + 1) & 0xFFFFFFFF
+	w.u32(seq)
 	var ack := _recv_hi if _recv_hi >= 0 else 0
-	w.u16(ack).u32(_recv_bits)
+	w.u32(ack).u32(_recv_bits)
 	var room := mtu - TAG - ENC_OVERHEAD
 	var ids: Array = []
 	# 1. надёжные, которым пора: новые и потерянные — по порядку id
@@ -429,8 +449,8 @@ func _send_packet(now_ms: int) -> void:
 		w.u8(REC_ONESHOT).u8(o[0]).bytes(ob)
 	var head: PackedByteArray = w.buf.slice(0, HEADER)
 	var packet: PackedByteArray = head
-	packet.append_array(Cipher.seal(enc_key, w.buf.slice(HEADER)))
-	packet.append_array(Hmac.tag(key, packet, TAG))
+	packet.append_array(Cipher.seal(tx_enc, w.buf.slice(HEADER)))
+	packet.append_array(Hmac.tag(tx_key, packet, TAG))
 	_sent[seq] = {"t": now_ms, "ids": ids}
 	_ack_due = -1
 	_last_send_ms = now_ms
