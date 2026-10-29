@@ -28,7 +28,7 @@ https://paxnet.isroot.in/
 `mod.json` вашего мода:
 
 ```json
-"depends": ["paxnet"]
+"depends": ["paxnet_core"]
 ```
 
 Библиотека создаёт узел `/root/PaxNetLib`. Ещё до входа узла в дерево он доступен через метаданные
