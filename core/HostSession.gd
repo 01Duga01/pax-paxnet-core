@@ -20,6 +20,7 @@ const MAX_CLOSURE := 1100       # шаг обязан влезать в одно
 const LOG_TICKS := 3000
 const RING_TICKS := 900
 const INLINE_PATCH := 8000
+const MAX_SMALL_NODES := 4000     # элементов в приказе, команде лобби, чате: разбор считается по элементам, не по байтам
 
 var cfg := {
 	"name": "", "max_players": 5, "code": "", "mods": "", "game_ver": "",
@@ -349,7 +350,7 @@ func app_send(to: int, type: String, data) -> void:
 # ------------------------------------------------------------------ приказы
 
 func _on_action(p: Dictionary, body: PackedByteArray) -> void:
-	var d := Bytes.decode(body)
+	var d := Bytes.decode(body, MAX_SMALL_NODES)
 	if not d["ok"] or not (d["v"] is Dictionary):
 		return
 	var a: Dictionary = d["v"]
@@ -439,7 +440,7 @@ func host_action(kind: String, args = null) -> Dictionary:
 # ------------------------------------------------------------------ лобби
 
 func _on_lobby_cmd(id: int, body: PackedByteArray) -> void:
-	var d := Bytes.decode(body)
+	var d := Bytes.decode(body, MAX_SMALL_NODES)
 	if not d["ok"] or not (d["v"] is Dictionary):
 		return
 	lobby_cmd(id, d["v"])
@@ -598,7 +599,7 @@ func _broadcast_lobby() -> void:
 # ------------------------------------------------------------------ чат
 
 func _on_chat(id: int, body: PackedByteArray) -> void:
-	var d := Bytes.decode(body)
+	var d := Bytes.decode(body, MAX_SMALL_NODES)
 	if not d["ok"] or not (d["v"] is Dictionary):
 		return
 	chat(id, str(d["v"].get("text", "")))
@@ -634,7 +635,7 @@ func chat(id: int, text: String) -> bool:
 # ------------------------------------------------------------------ время
 
 func _on_time_cmd(id: int, body: PackedByteArray) -> void:
-	var d := Bytes.decode(body)
+	var d := Bytes.decode(body, MAX_SMALL_NODES)
 	if d["ok"] and d["v"] is Dictionary:
 		time_cmd(id, str(d["v"].get("k", "")), d["v"].get("v"))
 
@@ -956,7 +957,7 @@ func _on_resync(p: Dictionary, body: PackedByteArray) -> void:
 	if body.size() > int(cfg["max_resync_bytes"]):
 		stats["rejected"] += 1
 		return
-	var d := Bytes.decode(body)
+	var d := Bytes.decode(body, MAX_SMALL_NODES)
 	if not d["ok"] or not (d["v"] is Dictionary) or p["state"] != "play":
 		return
 	if _now - int(p["last_resync_ms"]) < int(cfg["resync_gap_ms"]):
