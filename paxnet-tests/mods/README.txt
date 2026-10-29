@@ -1,1 +1,1 @@
-Сюда - ссылка или копия мода: mods/paxnet_core -> ../../paxnet_core
+Сюда run.sh кладёт ссылку на мод: mods/paxnet_core -> корень репозитория.
