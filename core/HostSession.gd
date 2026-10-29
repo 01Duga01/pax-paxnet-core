@@ -43,6 +43,11 @@ var cfg := {
 	# Лечение разделов (M_RESYNC): не чаще раза в resync_gap_ms и не больше resync_burst подряд, ведро пополняется
 	# раз в resync_refill_ms.
 	"resync_gap_ms": 250, "resync_burst": 6, "resync_refill_ms": 5000,
+	# Отставший (или молчащий) гость держит шаги мира не дольше lag_kick_ms; потом звено рвётся.
+	"lag_kick_ms": 15000,
+	# Размеры сообщений гостя до разбора (байт): разбор дорогой, длину проверяем раньше.
+	"max_lobby_cmd_bytes": 1024, "max_chat_bytes": 2048, "max_time_cmd_bytes": 256, "max_resync_bytes": 8192,
+	"max_frag_bytes": 8 << 20, "max_roster": 0,    # max_roster = 0: max_players * 4, не меньше 16
 }
 var phase := "lobby"             # lobby | playing
 var peers := {}                  # id → peer
@@ -55,6 +60,7 @@ var _apps := {}                  # ключ игрока → AppChannel (жив�
 var stats := {"steps": 0, "patches": 0, "worlds": 0, "replays": 0, "resyncs": 0, "dup_actions": 0, "rejected": 0, "desync_reports": 0}
 
 var _next_id := 2
+var _lag_since := {}            # id игрока → когда начал держать шаги
 var _pending_actions: Array = []
 var _pending_events: Array = []
 var _pending_news: Array = []
@@ -146,8 +152,13 @@ func _admit(_endpoint, info: Dictionary, now_ms: int) -> Dictionary:
 		return {"ok": false, "code": Proto.ERR_CODE}
 	var known: Dictionary = roster.get(key, {})
 	var reconnect := not known.is_empty()
+	if reconnect and now_ms < int(known.get("banned_until", 0)):
+		return {"ok": false, "code": Proto.ERR_BANNED}
 	if not reconnect:
 		if _humans_online() >= int(cfg["max_players"]):
+			return {"ok": false, "code": Proto.ERR_FULL}
+		var roster_cap: int = int(cfg["max_roster"]) if int(cfg["max_roster"]) > 0 else maxi(int(cfg["max_players"]) * 4, 16)
+		if roster.size() >= roster_cap:
 			return {"ok": false, "code": Proto.ERR_FULL}
 		if phase == "playing" and not bool(cfg["join_in_progress"]):
 			return {"ok": false, "code": Proto.ERR_STARTED}
@@ -223,21 +234,37 @@ func _on_message(p: Dictionary, type: int, body: PackedByteArray) -> void:
 		Proto.M_FRAG:
 			var done: Array = p["frag"].feed(body)
 			if not done.is_empty():
-				_on_message(p, int(done[0]), done[1])
+				var inner_type: int = int(done[0])
+				var inner: PackedByteArray = done[1]
+				# частями ездят только сообщения мода и просьбы о лечении; вложенные куски не принимаем
+				if inner_type == Proto.M_FRAG or not (inner_type == Proto.M_APP or inner_type == Proto.M_RESYNC):
+					stats["rejected"] += 1
+				elif inner.size() > int(cfg["max_frag_bytes"]):
+					_drop_peer(p, "app_abuse")
+				else:
+					_on_message(p, inner_type, inner)
 		Proto.M_LOBBY_CMD:
-			_on_lobby_cmd(p["id"], body)
+			if body.size() <= int(cfg["max_lobby_cmd_bytes"]):
+				_on_lobby_cmd(p["id"], body)
 		Proto.M_CHAT:
-			_on_chat(p["id"], body)
+			if body.size() <= int(cfg["max_chat_bytes"]):
+				_on_chat(p["id"], body)
 		Proto.M_ACTION:
-			_on_action(p, body)
+			if body.size() <= MAX_ACTION_BYTES:
+				_on_action(p, body)
+			else:
+				stats["rejected"] += 1
+				_ack_action_size(p)
 		Proto.M_TIME_CMD:
-			_on_time_cmd(p["id"], body)
+			if body.size() <= int(cfg["max_time_cmd_bytes"]):
+				_on_time_cmd(p["id"], body)
 		Proto.M_REPORT:
 			var r := Bytes.R.new(body)
 			var t := r.varint()
 			var hv := r.u32()
-			if r.ok:
-				p["reported"] = t
+			if r.ok and t <= tick:
+				# отчёт не откатывает назад и не заглядывает в будущее: отставание считает хост по своему тику
+				p["reported"] = maxi(int(p["reported"]), t)
 				p["report_ms"] = _now
 				if _ring.has(t) and int(_ring[t]["c"]) != hv:
 					stats["desync_reports"] += 1
@@ -335,6 +362,11 @@ func _on_action(p: Dictionary, body: PackedByteArray) -> void:
 	r["cseq"] = c
 	var res := _queue_action(p["id"], c, str(a.get("k", "")), a.get("g"), body.size())
 	_ack_action(p, c, res["ok"], str(res.get("code", "")))
+
+
+func _ack_action_size(p: Dictionary) -> void:
+	if p.get("link") != null:
+		p["link"].send_reliable(Proto.M_ACTION_RESULT, Bytes.encode({"c": 0, "ok": false, "code": Proto.ERR_ILLEGAL}))
 
 
 func _ack_action(p: Dictionary, c: int, ok: bool, code: String) -> void:
@@ -441,6 +473,25 @@ func lobby_cmd(id: int, cmd: Dictionary) -> Dictionary:
 					cfg[k] = cmd[k]
 			time.mode = str(cfg["time_mode"])
 			time.version += 1
+		"coruler_invite":
+			# владелец места зовёт игрока в соправители: без приглашения занять чужое место нельзя
+			if not _is_player_key(key) or str(r["role"]) != "player":
+				return {"ok": false, "code": Proto.ERR_ILLEGAL}
+			var tkey := _key_of(int(cmd.get("id", 0)))
+			if tkey == "" or tkey == key:
+				return {"ok": false, "code": Proto.ERR_ILLEGAL}
+			var inv: Dictionary = r.get("invites", {})
+			if inv.size() >= 8:
+				return {"ok": false, "code": Proto.ERR_RATE}
+			inv[tkey] = true
+			r["invites"] = inv
+		"coruler_revoke":
+			var rkey := _key_of(int(cmd.get("id", 0)))
+			(r.get("invites", {}) as Dictionary).erase(rkey)
+			if rkey != "" and roster.has(rkey) and str(roster[rkey]["role"]) == "coruler" and int(roster[rkey]["seat"]) == int(r["seat"]):
+				_release_seat(rkey)
+				roster[rkey]["seat"] = -1
+				roster[rkey]["role"] = "spectator"
 		"kick":
 			if id != HOST_ID:
 				return {"ok": false, "code": Proto.ERR_HOST_ONLY}
@@ -461,8 +512,20 @@ func lobby_cmd(id: int, cmd: Dictionary) -> Dictionary:
 var _host_ready := true
 
 
+func _seat_valid(seat: int) -> bool:
+	var cs: Array = adapter.countries()
+	if cs.is_empty():
+		return seat >= 0 and seat < 64
+	for c in cs:
+		if c is Dictionary and int(c.get("id", -1)) == seat:
+			return true
+	return false
+
+
 func _choose_seat(id: int, key: String, seat: int, role: String) -> Dictionary:
 	var r: Dictionary = roster[key]
+	if seat >= 0 and role != "spectator" and not _seat_valid(seat):
+		return {"ok": false, "code": Proto.ERR_ILLEGAL}
 	if role == "spectator" or seat < 0:
 		_release_seat(key)
 		r["seat"] = -1
@@ -475,6 +538,9 @@ func _choose_seat(id: int, key: String, seat: int, role: String) -> Dictionary:
 	if role == "player" and holder != "":
 		return {"ok": false, "code": Proto.ERR_SEAT_TAKEN}
 	if role == "coruler" and (holder == "" or not bool(cfg["allow_coruler"])):
+		return {"ok": false, "code": Proto.ERR_ILLEGAL}
+	# соправителем становятся только по приглашению владельца места (хозяин партии вправе и без него)
+	if role == "coruler" and id != HOST_ID and not (roster[holder].get("invites", {}) as Dictionary).has(key):
 		return {"ok": false, "code": Proto.ERR_ILLEGAL}
 	if role != "player" and role != "coruler":
 		return {"ok": false, "code": Proto.ERR_ILLEGAL}
@@ -573,12 +639,36 @@ func _on_time_cmd(id: int, body: PackedByteArray) -> void:
 		time_cmd(id, str(d["v"].get("k", "")), d["v"].get("v"))
 
 
+func _time_rate_ok(id: int) -> bool:
+	var e: Dictionary = _chat_rate.get("t%d" % id, {"t": _now, "n": 0.0})
+	var n := maxf(float(e["n"]) - float(_now - int(e["t"])) / 1000.0 * 2.0, 0.0) + 1.0
+	_chat_rate["t%d" % id] = {"t": _now, "n": n}
+	return n <= 8.0
+
+
+func _is_player_key(key: String) -> bool:
+	if key == "" or not roster.has(key):
+		return false
+	return int(roster[key]["seat"]) >= 0 and (str(roster[key]["role"]) == "player" or str(roster[key]["role"]) == "coruler")
+
+
 func time_cmd(id: int, kind: String, value = null) -> Dictionary:
 	var key := _key_of(id)
+	if id != HOST_ID:
+		# время решают игроки со страной; наблюдатели не голосуют; команды не чаще нескольких в секунду
+		var pp = peers.get(id)
+		if not _time_rate_ok(id):
+			if pp != null:
+				_notice(pp, Proto.ERR_RATE)
+			return {"ok": false, "code": Proto.ERR_RATE, "changed": false}
+		if not _is_player_key(key):
+			if pp != null:
+				_notice(pp, Proto.ERR_ILLEGAL)
+			return {"ok": false, "code": Proto.ERR_ILLEGAL, "changed": false}
 	var nm: String = str(roster[key]["name"]) if key != "" else host_name
 	var voters: Array = [HOST_ID]
 	for pid in peers:
-		if peers[pid]["state"] == "play" or peers[pid]["state"] == "sync":
+		if (peers[pid]["state"] == "play" or peers[pid]["state"] == "sync") and _is_player_key(_key_of(int(pid))):
 			voters.append(pid)
 	var res: Dictionary = time.command(id, nm, id == HOST_ID, kind, value, voters, _now)
 	if not res["ok"]:
@@ -694,12 +784,21 @@ func _send_replay(p: Dictionary, last_tick: int) -> void:
 
 
 func _slowest_lag() -> int:
+	return int(_slowest()[0])
+
+
+# [отставание, id] самого отстающего игрока в игре.
+func _slowest() -> Array:
 	var worst := 0
+	var who := 0
 	for id in peers:
 		var p: Dictionary = peers[id]
 		if p["state"] == "play":
-			worst = maxi(worst, tick - int(p["reported"]))
-	return worst
+			var lag: int = tick - int(p["reported"])
+			if lag > worst:
+				worst = lag
+				who = int(id)
+	return [worst, who]
 
 
 # Сколько приказов влезет в шаг: место под суммы разделов меряем по полному набору сумм.
@@ -854,6 +953,9 @@ func record_step(days: int, iv: int = 0) -> void:
 # ------------------------------------------------------------------ лечение
 
 func _on_resync(p: Dictionary, body: PackedByteArray) -> void:
+	if body.size() > int(cfg["max_resync_bytes"]):
+		stats["rejected"] += 1
+		return
 	var d := Bytes.decode(body)
 	if not d["ok"] or not (d["v"] is Dictionary) or p["state"] != "play":
 		return
@@ -974,11 +1076,26 @@ func update(now_ms: int) -> void:
 
 
 func _maybe_step(now_ms: int) -> void:
-	if _slowest_lag() > int(cfg["lag_cap_ticks"]):
+	var slow := _slowest()
+	if int(slow[0]) > int(cfg["lag_cap_ticks"]):
+		var sid: int = int(slow[1])
+		if not _lag_since.has(sid):
+			_lag_since.clear()
+			_lag_since[sid] = now_ms
+		elif now_ms - int(_lag_since[sid]) > int(cfg["lag_kick_ms"]) and peers.has(sid):
+			# держит шаги слишком долго (молчит, застрял или врёт в отчётах): звено рвём, вернуться можно
+			var key := _key_of(sid)
+			if key != "":
+				roster[key]["lag_strikes"] = int(roster[key].get("lag_strikes", 0)) + 1
+				if int(roster[key]["lag_strikes"]) >= 3:
+					roster[key]["banned_until"] = now_ms + 60000
+			_lag_since.erase(sid)
+			_drop_peer(peers[sid], "lag")
 		if now_ms - _waiting_note_ms > 5000:
 			_waiting_note_ms = now_ms
-			_emit("waiting_for_slow", {"lag": _slowest_lag()})
+			_emit("waiting_for_slow", {"lag": int(slow[0])})
 		return
+	_lag_since.clear()
 	var has_extra := not _pending_actions.is_empty() or not _pending_events.is_empty() or not _pending_news.is_empty() or not _pending_ai.is_empty()
 	var days := 0
 	var iv := 100

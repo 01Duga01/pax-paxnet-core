@@ -328,6 +328,15 @@ func choose_seat(seat: int, as_coruler: bool = false) -> void:
 	lobby_cmd({"op": "seat", "seat": seat, "role": "coruler" if as_coruler else "player"})
 
 
+## Владелец места зовёт игрока в соправители (без приглашения занять чужое место нельзя).
+func invite_coruler(guest_id: int) -> void:
+	lobby_cmd({"op": "coruler_invite", "id": guest_id})
+
+
+func revoke_coruler(guest_id: int) -> void:
+	lobby_cmd({"op": "coruler_revoke", "id": guest_id})
+
+
 func kick(id: int) -> void:
 	if role == "host":
 		lobby_cmd({"op": "kick", "id": id})
