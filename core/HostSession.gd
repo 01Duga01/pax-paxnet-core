@@ -46,6 +46,8 @@ var cfg := {
 	"resync_gap_ms": 250, "resync_burst": 6, "resync_refill_ms": 5000,
 	# Отставший (или молчащий) гость держит шаги мира не дольше lag_kick_ms; потом звено рвётся.
 	"lag_kick_ms": 15000,
+	# Все сообщения одного игрока (любого типа): сообщений в секунду и ведро. Больше: звено рвётся.
+	"peer_msgs_per_s": 300.0, "peer_msgs_burst": 600,
 	# Размеры сообщений гостя до разбора (байт): разбор дорогой, длину проверяем раньше.
 	"max_lobby_cmd_bytes": 1024, "max_chat_bytes": 2048, "max_time_cmd_bytes": 256, "max_resync_bytes": 8192,
 	"max_frag_bytes": 8 << 20, "max_roster": 0,    # max_roster = 0: max_players * 4, не меньше 16
@@ -196,7 +198,8 @@ func _attach(ctx: Dictionary, link, endpoint) -> void:
 		"rtt": 0.0, "reported": tick, "ready": false, "rate": 0.0, "rate_ms": 0, "frag": Frag.new(), "xfer": null,
 		"away_ms": 0, "ai_set": false, "last_resync_ms": -10000,
 		"app_t": _now, "app_msgs": float(cfg["app_msgs_per_s"]) * 2.0, "app_bytes": float(maxi(int(cfg["app_burst_bytes"]), int(cfg["app_max_unpack"]))),
-		"resync_tokens": float(cfg["resync_burst"]), "resync_t": _now}
+		"resync_tokens": float(cfg["resync_burst"]), "resync_t": _now,
+		"msg_t": _now, "msg_n": float(cfg["peer_msgs_burst"])}
 	if peers.has(id):
 		p["ready"] = bool(peers[id].get("ready", false))
 	peers[id] = p
@@ -231,6 +234,13 @@ func _close_link(p: Dictionary) -> void:
 # ------------------------------------------------------------------ приём сообщений
 
 func _on_message(p: Dictionary, type: int, body: PackedByteArray) -> void:
+	# общий предел сообщений игрока: любой тип стоит хосту разбора, поэтому считаем все
+	var dt_msg := float(_now - int(p["msg_t"])) / 1000.0
+	p["msg_t"] = _now
+	p["msg_n"] = minf(float(p["msg_n"]) + dt_msg * float(cfg["peer_msgs_per_s"]), float(cfg["peer_msgs_burst"])) - 1.0
+	if float(p["msg_n"]) < 0.0:
+		_drop_peer(p, "flood")
+		return
 	match type:
 		Proto.M_FRAG:
 			var done: Array = p["frag"].feed(body)
