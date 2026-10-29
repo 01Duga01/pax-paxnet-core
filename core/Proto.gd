@@ -7,9 +7,8 @@ extends RefCounted
 ## Версия протокола совпадает с версией библиотеки (semver) и берётся из её mod.json при загрузке мода
 ## (main.gd -> PaxNetLib.read_manifest -> set_version). Гость и хост соединяются только при точном совпадении:
 ## формат пакетов и рукопожатия менялся без обратной совместимости. Вручную нигде менять не нужно.
-## FALLBACK_VERSION нужна лишь если mod.json прочитать не удалось.
-const FALLBACK_VERSION := "3.1.1"
-static var version: String = FALLBACK_VERSION
+## Пока версия не прочитана (mod.json недоступен), она пустая, и новые партии отказываются работать (lib_version).
+static var version: String = ""
 
 
 ## x.y.z из целых чисел (не длиннее 32 знаков).

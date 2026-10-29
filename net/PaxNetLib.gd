@@ -145,6 +145,8 @@ func new_session(parent: Node = null, app: Object = null, require: String = "") 
 		s.set("app_version", str(man["version"]))
 	var req: String = require if require != "" else str(man.get("paxnet", ""))
 	var chk: Dictionary = Proto.check_requirement(req)
+	if Proto.version == "":
+		chk = {"ok": false, "error": Proto.ERR_LIB_VERSION}
 	if not bool(chk["ok"]):
 		s.set("lib_error", str(chk["error"]))
 		push_warning("[paxnet] %s requires PaxNet Core %s, installed %s" % [str(man.get("id", "mod")), req, Proto.version])
