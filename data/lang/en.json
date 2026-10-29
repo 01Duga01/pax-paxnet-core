@@ -13,6 +13,8 @@
 	"paxnet_btn_ok": "OK",
 	"paxnet_err_version": "Your network version differs from the host's.",
 	"paxnet_err_version_do": "Update the game to the host's version and join again.",
+	"paxnet_err_app_version": "The version of the mod you play with differs from the host's.",
+	"paxnet_err_app_version_do": "Install the same version of the mod as the host and join again.",
 	"paxnet_err_mods": "Your mods differ from the host's.",
 	"paxnet_err_mods_do": "Enable the same mods as the host and join again.",
 	"paxnet_err_full": "No free seats in this game.",

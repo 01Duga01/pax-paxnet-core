@@ -4,9 +4,30 @@ extends RefCounted
 #
 # ПРОТОКОЛ: номера сообщений и коды причин. Описание — в README мода («Протокол»).
 
-## Версия протокола и библиотеки (semver). Гость и хост соединяются только при точном совпадении: формат пакетов и
-## рукопожатия менялся без обратной совместимости. Меняйте вместе с "version" в mod.json.
-const VERSION := "3.1.1"
+## Версия протокола совпадает с версией библиотеки (semver) и берётся из её mod.json при загрузке мода
+## (main.gd -> PaxNetLib.read_manifest -> set_version). Гость и хост соединяются только при точном совпадении:
+## формат пакетов и рукопожатия менялся без обратной совместимости. Вручную нигде менять не нужно.
+## FALLBACK_VERSION нужна лишь если mod.json прочитать не удалось.
+const FALLBACK_VERSION := "3.1.1"
+static var version: String = FALLBACK_VERSION
+
+
+## x.y.z из целых чисел (не длиннее 32 знаков).
+static func valid_version(v: String) -> bool:
+	if v.length() == 0 or v.length() > 32:
+		return false
+	var parts: PackedStringArray = v.split(".")
+	if parts.size() != 3:
+		return false
+	for p in parts:
+		if not p.is_valid_int() or int(p) < 0:
+			return false
+	return true
+
+
+static func set_version(v: String) -> void:
+	if valid_version(v):
+		version = v
 
 # --- сообщения звена (после рукопожатия) ---
 const M_LOBBY := 10          # хост → все: состояние лобби целиком (версия растёт)          reliable
@@ -44,6 +65,7 @@ const H_REJECT := 5
 
 # --- коды причин (в журнал и в окно игрока через ключ перевода paxnet_err_<код>) ---
 const ERR_VERSION := "version"           # другая версия протокола
+const ERR_APP_VERSION := "app_version"   # версия (или id) мода-потребителя у гостя и хоста разная
 const ERR_MODS := "mods"                 # наборы модов не совпали
 const ERR_FULL := "full"                 # лобби заполнено
 const ERR_CODE := "code"                 # нет такого кода / приглашения
