@@ -22,7 +22,7 @@ const Cipher = preload("res://mods/paxnet/core/Cipher.gd")
 const UdpLink = preload("res://mods/paxnet/core/UdpLink.gd")
 
 const WINDOW_MS := 10000
-const HELLO_SIZE := 640        # не меньше CHALLENGE (в нём открытый ключ): ответ не больше запроса
+const HELLO_SIZE := 400        # не меньше CHALLENGE (в нём открытый ключ): ответ не больше запроса
 
 
 const Fr = preload("res://mods/paxnet/core/HsFrames.gd")

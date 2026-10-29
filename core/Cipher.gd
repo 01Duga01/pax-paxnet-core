@@ -2,10 +2,10 @@ extends RefCounted
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
-# ШИФРОВАНИЕ ЗВЕНА. Дёшево и быстро: тяжёлое (RSA-2048) — один раз на вход, всё остальное — AES-256-CBC
+# ШИФРОВАНИЕ ЗВЕНА. Дёшево и быстро: тяжёлое (RSA-1024) — один раз на вход, всё остальное — AES-128-CBC
 # встроенного AESContext (случайный IV на пакет) и HMAC-SHA256, которым звено и так подписано.
 #
-#   хост    : RSA-пара на процесс; открытый ключ едет в CHALLENGE;
+#   хост    : RSA-1024 (ключ живёт один процесс, нужен на часы, не на годы), пара на процесс; открытый ключ едет в CHALLENGE;
 #   гость   : случайный секрет на 32 байта, шлёт его хосту под RSA; из секрета — ключ звена и ключ рукопожатия;
 #   дальше  : info (ключ игрока, имя) и welcome шифруются секретом, пакеты звена — AES-CBC + подпись (шифруй, потом подписывай).
 #
@@ -15,7 +15,8 @@ extends RefCounted
 const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
 
 const BLOCK := 16
-const RSA_BITS := 2048
+const RSA_BITS := 1024
+const KEY_LEN := 16              # AES-128
 const SECRET_LEN := 32
 const MAC_LEN := 16
 
@@ -58,6 +59,11 @@ static func derive(key: PackedByteArray, label: String) -> PackedByteArray:
 	return Hmac.mac(key, label.to_utf8_buffer())
 
 
+## Ключ AES-128 из ключа звена или секрета.
+static func derive_aes(key: PackedByteArray, label: String) -> PackedByteArray:
+	return derive(key, label).slice(0, KEY_LEN)
+
+
 # ------------------------------------------------------------------ AES-CBC
 
 ## [IV 16][шифртекст]; дополнение PKCS7 (1..16 байт).
@@ -94,7 +100,7 @@ static func open(enc_key: PackedByteArray, sealed: PackedByteArray) -> Variant:
 
 ## Шифр + подпись для коротких блоков рукопожатия (info, welcome).
 static func seal_mac(secret: PackedByteArray, label: String, plain: PackedByteArray) -> PackedByteArray:
-	var out: PackedByteArray = seal(derive(secret, label + "-enc"), plain)
+	var out: PackedByteArray = seal(derive_aes(secret, label + "-enc"), plain)
 	out.append_array(Hmac.tag(derive(secret, label + "-mac"), out, MAC_LEN))
 	return out
 
@@ -105,4 +111,4 @@ static func open_mac(secret: PackedByteArray, label: String, blob: PackedByteArr
 	var body: PackedByteArray = blob.slice(0, blob.size() - MAC_LEN)
 	if not Hmac.equal(Hmac.tag(derive(secret, label + "-mac"), body, MAC_LEN), blob.slice(blob.size() - MAC_LEN)):
 		return null
-	return open(derive(secret, label + "-enc"), body)
+	return open(derive_aes(secret, label + "-enc"), body)

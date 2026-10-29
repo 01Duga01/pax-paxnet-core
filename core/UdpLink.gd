@@ -14,7 +14,7 @@ extends RefCounted
 #   oneshot    — одноразовое без повторов (куски больших передач: повтором занимается Xfer).
 #
 # Заголовок пакета: magic u8 | flags u8 (бит 0 — поле ack действительно) | conn u32 | seq u16 | ack u16 | ack_bits u32 (бит i — получен
-# пакет ack-1-i) | IV (16) | записи, зашифрованные AES-256-CBC (с дополнением до 16) | подпись HMAC-SHA256
+# пакет ack-1-i) | IV (16) | записи, зашифрованные AES-128-CBC (с дополнением до 16) | подпись HMAC-SHA256
 # (8 байт) по всему пакету. Ключи шифра и подписи выводятся из ключа звена (см. Cipher.gd); заголовок открыт.
 #
 # Время передаётся снаружи (now_ms), сокетов здесь нет: ядро одинаково работает на настоящем
@@ -79,7 +79,7 @@ var max_packets_per_poll := 6
 func _init(conn: int = 0, key_: PackedByteArray = PackedByteArray()) -> void:
 	conn_id = conn
 	key = key_
-	enc_key = Cipher.derive(key_, "pax-pkt-enc")
+	enc_key = Cipher.derive_aes(key_, "pax-pkt-enc")
 
 
 func budget() -> int:
