@@ -1251,14 +1251,14 @@ What the network test covers: room, code and PIN; joining via a link with the PI
 
 ### Run it yourself
 
-The tests live in the repository in the `paxnet-tests` folder and as a separate archive for developers. Test files are stored with a `.txt` suffix so the mod sandbox check does not scan them. To run them use the `run.sh.txt` script: it builds an ordinary Godot project in a temporary folder and starts it. You need `godot` in `PATH`.
+The tests come as a separate archive for developers: download it from the [website](https://paxnet.isroot.in/) and unpack it so you get a `paxnet-tests` folder. The tests were written before invites with a PIN: guests in them must join with `invite_code()` (the code with the PIN), not with a bare code.
 
 [Download the tests](https://drive.google.com/file/d/1s8JAb5v5RnquTrU2xgtFdy8fNsItt4dR/view?usp=sharing) \| [Source code on GitHub](https://github.com/01Duga01/pax-paxnet-core)
 
 ``` bash
-bash paxnet-tests/run.sh.txt compile   # compile all scripts
-bash paxnet-tests/run.sh.txt net       # network test
-python3 paxnet-tests/sandbox_scan.py . paxnet_core   # sandbox scanner (findings inside paxnet-tests are expected: those are the tests)
+godot --headless --path /paxnet_core/paxnet-tests res://tests/compile.tscn   # compile all scripts
+godot --headless --path /paxnet_core/paxnet-tests res://tests/net.tscn       # network test
+python3 /paxnet_core/paxnet-tests/sandbox_scan.py /paxnet_core/paxnet-tests/mods/paxnet_core paxnet_core   # sandbox scanner
 ```
 
 ### What to check in the game itself

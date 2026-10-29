@@ -1240,14 +1240,14 @@ HMAC-SHA256 (16 байт) по всему, что выше                      
 
 ### Запустить самому
 
-Тесты лежат в репозитории в папке `paxnet-tests` и отдельным архивом для разработчиков. Файлы тестов хранятся с суффиксом `.txt`, чтобы проверка песочницы мода их не сканировала. Для запуска используйте скрипт `run.sh.txt`: он собирает во временной папке обычный проект Godot и запускает его. Нужен `godot` в `PATH`.
+Тесты лежат в отдельном архиве для разработчиков: скачайте его на [сайте](https://paxnet.isroot.in/) и распакуйте так, чтобы получилась папка `paxnet-tests`. Тесты написаны до приглашений с PIN: гостей в них нужно впускать по `invite_code()` (код с PIN), а не по голому коду.
 
 [Скачать тесты](https://drive.google.com/file/d/1s8JAb5v5RnquTrU2xgtFdy8fNsItt4dR/view?usp=sharing) \| [Исходный код на GitHub](https://github.com/01Duga01/pax-paxnet-core)
 
 ``` bash
-bash paxnet-tests/run.sh.txt compile   # компиляция всех скриптов
-bash paxnet-tests/run.sh.txt net       # сетевой тест
-python3 paxnet-tests/sandbox_scan.py . paxnet_core   # сканер песочницы (замечания в paxnet-tests не страшны: это тесты)
+godot --headless --path /paxnet_core/paxnet-tests res://tests/compile.tscn   # компиляция всех скриптов
+godot --headless --path /paxnet_core/paxnet-tests res://tests/net.tscn       # сетевой тест
+python3 /paxnet_core/paxnet-tests/sandbox_scan.py /paxnet_core/paxnet-tests/mods/paxnet_core paxnet_core   # сканер песочницы
 ```
 
 ### Что проверить в самой игре
