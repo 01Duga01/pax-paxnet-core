@@ -10,7 +10,7 @@ extends Node
 #   var net: Node = lib.new_session()            # net/Session.gd: host / join / send / message
 #   var Bytes: Script = lib.script_of("Bytes")   # любой скрипт ядра по имени
 
-const VERSION: String = "1.0.0"
+const VERSION: String = "3.1.1"
 const NODE_NAME: String = "PaxNetLib"
 const META: String = "paxnet_lib"
 

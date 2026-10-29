@@ -149,7 +149,7 @@ func _admit(_endpoint, info: Dictionary, now_ms: int) -> Dictionary:
 	var key := str(info.get("key", ""))
 	if key == "" or key.length() > 64:
 		return {"ok": false, "code": Proto.ERR_CODE}
-	if int(info.get("proto", 0)) != Proto.VERSION:
+	if str(info.get("proto", "")) != Proto.VERSION:
 		return {"ok": false, "code": Proto.ERR_VERSION}
 	if str(cfg["mods"]) != "" and str(info.get("mods", "")) != str(cfg["mods"]):
 		return {"ok": false, "code": Proto.ERR_MODS}

@@ -1193,7 +1193,7 @@ This is a summary, not legal advice. If it matters, read the full license text.
 
 ## Protocol
 
-You do not need to know this to use the library. The core protocol version is unchanged (`Proto.VERSION = 1`), but the packet and handshake formats changed because of encryption, so PaxNet Core builds from before and after this update will not connect to each other. Link packets travel as datagrams of the game channel instead of UDP. In the channel the host is number 1, guests are 2 and up. To the core, a guest's address looks like `pipe#number`.
+You do not need to know this to use the library. The protocol version equals the library version (`Proto.VERSION = "3.1.1"`) and travels in `HELLO` as a string. The host accepts a guest only on an exact version match, because the packet and handshake formats changed without backward compatibility (encryption), and PaxNet Core builds from before and after it will not connect to each other. Link packets travel as datagrams of the game channel instead of UDP. In the channel the host is number 1, guests are 2 and up. To the core, a guest's address looks like `pipe#number`.
 
 #### Link packet
 
