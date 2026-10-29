@@ -147,9 +147,11 @@ func new_session(parent: Node = null, app: Object = null, require: String = "") 
 	var chk: Dictionary = Proto.check_requirement(req)
 	if Proto.version == "":
 		chk = {"ok": false, "error": Proto.ERR_LIB_VERSION}
+		push_warning("[paxnet] PaxNet Core version is unknown: mod.json of paxnet_core could not be read, sessions are disabled")
+	elif not bool(chk["ok"]):
+		push_warning("[paxnet] %s requires PaxNet Core %s, installed %s" % [str(man.get("id", "mod")), req, Proto.version])
 	if not bool(chk["ok"]):
 		s.set("lib_error", str(chk["error"]))
-		push_warning("[paxnet] %s requires PaxNet Core %s, installed %s" % [str(man.get("id", "mod")), req, Proto.version])
 	s.set("pipe_factory", pipe_factory)
 	if parent != null:
 		parent.add_child(s)
