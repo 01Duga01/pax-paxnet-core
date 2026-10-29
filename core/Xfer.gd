@@ -145,6 +145,10 @@ class Sender extends RefCounted:
 			cwnd = 8.0
 
 
+const MAX_SIZE := 128 << 20       # самая большая передача (мир, лечебный пакет), байт
+const MAX_COUNT := 1 << 20
+
+
 class Receiver extends RefCounted:
 	var link
 	var id: int
@@ -170,7 +174,9 @@ class Receiver extends RefCounted:
 		chunk = r.varint()
 		crc = r.u32()
 		meta = r.variant()
-		if not r.ok or count <= 0 or count > 1 << 22 or size > 1 << 30:
+		# Размеры приходят от отправителя (хост для гостя, гость для хоста): потолки против нехватки памяти.
+		if not r.ok or count <= 0 or count > MAX_COUNT or size < 0 or size > MAX_SIZE or chunk <= 0 or chunk > 65536 \
+				or count > size / chunk + 1 or (size > 0 and count < size / chunk):
 			done = true
 
 	func valid() -> bool:

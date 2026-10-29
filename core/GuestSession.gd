@@ -14,6 +14,9 @@ const Delta = preload("res://mods/paxnet_core/core/Delta.gd")
 const AppChannel = preload("res://mods/paxnet_core/core/AppChannel.gd")
 const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
+const MAX_WORLD_RAW := 256 << 20      # размер мира после распаковки, который гость готов принять от хоста
+const MAX_PATCH_RAW := 64 << 20
+
 var state := "idle"              # idle | connecting | lobby | syncing | playing | reconnecting | failed | closed
 var key := ""
 var name := "?"
@@ -266,17 +269,17 @@ func _on_message(type: int, body: PackedByteArray) -> void:
 				adapter.on_notice(str(d5["v"].get("code", "")), d5["v"].get("args", {}))
 		Proto.M_PATCH:
 			var d6 := Bytes.decode(body)
-			if d6["ok"] and d6["v"] is Dictionary:
+			if d6["ok"] and d6["v"] is Dictionary and (d6["v"] as Dictionary).has("as_of"):
 				_queue_patch(int(d6["v"]["as_of"]), d6["v"])
 		Proto.M_PATCH_BLOB:
 			var d7 := Bytes.decode(body)
 			if d7["ok"] and d7["v"] is Dictionary:
-				_blob = {"xid": int(d7["v"]["xid"]), "as_of": int(d7["v"]["as_of"]), "kind": "patch", "raw": int(d7["v"].get("raw", 0))}
+				_blob = {"xid": int(d7["v"].get("xid", -1)), "as_of": int(d7["v"].get("as_of", 0)), "kind": "patch", "raw": int(d7["v"].get("raw", 0))}
 		Proto.M_WORLD:
 			var d8 := Bytes.decode(body)
-			if d8["ok"] and d8["v"] is Dictionary:
-				var as_of := int(d8["v"]["as_of"])
-				_blob = {"xid": int(d8["v"]["xid"]), "as_of": as_of, "kind": "world", "meta": d8["v"]["meta"]}
+			if d8["ok"] and d8["v"] is Dictionary and (d8["v"] as Dictionary).get("meta") is Dictionary:
+				var as_of := int(d8["v"].get("as_of", 0))
+				_blob = {"xid": int(d8["v"].get("xid", -1)), "as_of": as_of, "kind": "world", "meta": d8["v"]["meta"]}
 				state = "syncing"
 				_has_world = false
 				for t2 in _pending.keys():
@@ -377,13 +380,17 @@ func _on_blob(id: int, data: PackedByteArray) -> void:
 	var b := _blob
 	if b["kind"] == "world":
 		var meta: Dictionary = b["meta"]
-		var raw_size := int(meta["raw"])
+		var raw_size := int(meta.get("raw", 0)) if meta is Dictionary else -1
+		if raw_size < 0 or raw_size > MAX_WORLD_RAW:
+			_blob = {}
+			_emit("failed", {"code": Proto.ERR_DESYNC})
+			return
 		# пустой мир (адаптер без мира) - распаковывать нечего: decompress(0) движок не принимает
 		var raw: PackedByteArray = data.decompress(raw_size, Bytes.ZSTD) if raw_size > 0 else PackedByteArray()
 		if not adapter.install_world(raw):
 			_emit("failed", {"code": Proto.ERR_DESYNC})
 			return
-		world_seed = int(meta["seed"])
+		world_seed = int(meta.get("seed", 0))
 		tick = int(b["as_of"])
 		apply_own_sections(meta.get("own", {}))
 		time.load_dict(meta.get("time", {}))
@@ -395,9 +402,13 @@ func _on_blob(id: int, data: PackedByteArray) -> void:
 		_blob = {}
 		_emit("world_installed", {"tick": tick})
 	else:
-		var raw2: PackedByteArray = data.decompress(int(b["raw"]), Bytes.ZSTD) if int(b["raw"]) > 0 else PackedByteArray()
+		var raw_patch := int(b["raw"])
+		if raw_patch < 0 or raw_patch > MAX_PATCH_RAW:
+			_blob = {}
+			return
+		var raw2: PackedByteArray = data.decompress(raw_patch, Bytes.ZSTD) if raw_patch > 0 else PackedByteArray()
 		var d := Bytes.decode(raw2)
-		if d["ok"] and d["v"] is Dictionary:
+		if d["ok"] and d["v"] is Dictionary and (d["v"] as Dictionary).has("as_of"):
 			_queue_patch(int(d["v"]["as_of"]), d["v"])
 		_blob = {}
 

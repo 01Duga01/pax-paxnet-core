@@ -57,9 +57,41 @@ static func _dup(v):
 	return v.duplicate(true) if v is Dictionary or v is Array else v
 
 
+# Ожидаемые типы разделов: данные приходят от хоста и могут быть чужими (злонамеренный хост, другая версия).
+# Раздел не того типа не применяется (иначе скрипт упал бы или в состояние гостя попал бы мусор).
+const NUM_KEYS := ["day", "turn", "developed", "overthrows", "patience", "next_law", "next_development", "next_deed",
+	"next_id", "next_base", "next_operation", "cruelty", "secrecy", "broken_treaties", "next_mine"]
+const DICT_KEYS := ["resources", "parameters", "head_of_it", "rule_power", "course", "armies", "factions_other", "stores",
+	"relations", "extra_resources", "war_home", "seizures", "economy_of", "economics", "market", "flights", "world",
+	"infection", "life", "important", "scouted", "requests", "time_machine", "features", "owners"]
+const ARRAY_KEYS := ["laws", "research", "blueprints", "deliveries", "deeds", "factions", "orders", "organizations", "bases",
+	"operations", "threats", "megastructures", "terraforming", "lines_supply", "built_megaprojects", "entities",
+	"assignments", "history", "stations", "objects", "mines", "successes", "finds"]
+const MAX_NUM := 1.0e15
+
+
+static func _num(x) -> float:
+	if (x is int or x is float) and not is_nan(float(x)) and not is_inf(float(x)):
+		return clampf(float(x), -MAX_NUM, MAX_NUM)
+	return 0.0
+
+
+# true - раздел подходящего вида (или неизвестного ключа, его проверяет сам разбор).
+static func shape_ok(key: String, v) -> bool:
+	if NUM_KEYS.has(key):
+		return (v is int or v is float) and not is_nan(float(v)) and not is_inf(float(v)) and absf(float(v)) <= MAX_NUM
+	if DICT_KEYS.has(key):
+		return v is Dictionary
+	if ARRAY_KEYS.has(key):
+		return v is Array
+	return true
+
+
 # Записать раздел в живой мир. false — живого применения нет (нужна перезагрузка мира).
 static func apply_live(main: Node, key: String, v) -> bool:
 	var model = main.model
+	if not shape_ok(key, v):
+		return true   # чужой по виду раздел отбрасываем молча: считаем применённым, перезагрузка не нужна
 	match key:
 		"day":
 			model.sim.day = int(v)
@@ -67,10 +99,10 @@ static func apply_live(main: Node, key: String, v) -> bool:
 			model.sim.turn = int(v)
 		"resources":
 			for k in v:
-				model.sim.res[k] = float(v[k])
+				model.sim.res[k] = _num(v[k])
 		"parameters":
 			for k in v:
-				model.sim.params[k] = float(v[k])
+				model.sim.params[k] = _num(v[k])
 		"developed":
 			model.developed = float(v)
 		"head_of_it":
@@ -119,14 +151,16 @@ static func apply_live(main: Node, key: String, v) -> bool:
 					if not model.resources.stock_.has(str(name)):
 						model.resources.found(str(name), 0.0)
 					var z: Dictionary = model.resources.stock(str(name))
+					if not (v[name] is Dictionary):
+						continue
 					for k in v[name]:
 						var zn = v[name][k]
-						z[k] = _dup(zn) if zn is Dictionary else float(zn)
+						z[k] = _dup(zn) if zn is Dictionary else _num(zn)
 					ResourcesScript.to_new_keys(z, float(z.get("humans", 0.0)))
 		"relations":
 			if v is Dictionary and model.resources != null:
 				for name in v:
-					model.resources.relation_[name] = float(v[name])
+					model.resources.relation_[name] = _num(v[name])
 		"extra_resources":
 			if v is Dictionary and model.resources != null:
 				model.resources.extra = _dup(v)
@@ -140,9 +174,9 @@ static func apply_live(main: Node, key: String, v) -> bool:
 				for x in v:
 					if x is Dictionary:
 						var o: Dictionary = _dup(x)
-						o["id"] = int(float(o.get("id", 0)))
-						o["days"] = int(float(o.get("days", 0)))
-						o["elapsed"] = int(float(o.get("elapsed", 0)))
+						o["id"] = int(_num(o.get("id", 0)))
+						o["days"] = int(_num(o.get("days", 0)))
+						o["elapsed"] = int(_num(o.get("elapsed", 0)))
 						model.orders.append(o)
 		"next_id":
 			model.next_id = int(float(v))
@@ -200,11 +234,11 @@ static func apply_live(main: Node, key: String, v) -> bool:
 		"life":
 			model.life = _dup(v) if v is Dictionary else {}
 		"cruelty":
-			model.cruelty = float(v)
+			model.cruelty = _num(v)
 		"we_nuclear":
 			model.we_are_nuclear = bool(v)
 		"secrecy":
-			model.secrecy = clampf(float(v), 0.0, 1.0)
+			model.secrecy = clampf(_num(v), 0.0, 1.0)
 		"broken_treaties":
 			model.broken_treaties = int(v)
 		"mines":
