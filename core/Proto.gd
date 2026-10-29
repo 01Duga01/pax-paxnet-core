@@ -29,6 +29,45 @@ static func set_version(v: String) -> void:
 	if valid_version(v):
 		version = v
 
+
+## Сравнение x.y.z: -1, 0 или 1 (обе версии должны быть валидны).
+static func compare_versions(a: String, b: String) -> int:
+	var pa: PackedStringArray = a.split(".")
+	var pb: PackedStringArray = b.split(".")
+	for i in 3:
+		var x: int = int(pa[i])
+		var y: int = int(pb[i])
+		if x != y:
+			return -1 if x < y else 1
+	return 0
+
+
+## Требование мода к версии библиотеки: условия через пробел или запятую, все должны выполниться.
+## "3.1.1" - ровно эта версия; ">=3.1.0 <4.0.0" - диапазон. Знаки: >= > <= < = (без знака то же, что =).
+## Пустая строка - без требований. Возврат: {"ok": bool, "error": "" | "bad_requirement" | "lib_version"}.
+static func check_requirement(req: String, lib_version: String = "") -> Dictionary:
+	var lv: String = lib_version if lib_version != "" else version
+	var text: String = req.strip_edges()
+	if text == "":
+		return {"ok": true, "error": ""}
+	if text.length() > 64 or not valid_version(lv):
+		return {"ok": false, "error": "bad_requirement"}
+	var ok := true
+	for tok in text.replace(",", " ").split(" ", false):
+		var op := "="
+		var v: String = tok
+		for o: String in [">=", "<=", ">", "<", "="]:
+			if tok.begins_with(o):
+				op = o
+				v = tok.substr(o.length())
+				break
+		if not valid_version(v):
+			return {"ok": false, "error": "bad_requirement"}
+		var c: int = compare_versions(lv, v)
+		var pass_: bool = (c >= 0) if op == ">=" else (c <= 0) if op == "<=" else (c > 0) if op == ">" else (c < 0) if op == "<" else (c == 0)
+		ok = ok and pass_
+	return {"ok": ok, "error": "" if ok else "lib_version"}
+
 # --- сообщения звена (после рукопожатия) ---
 const M_LOBBY := 10          # хост → все: состояние лобби целиком (версия растёт)          reliable
 const M_LOBBY_CMD := 11      # гость → хост: выбрать страну, готовность, имя, правила          reliable
@@ -66,6 +105,8 @@ const H_REJECT := 5
 # --- коды причин (в журнал и в окно игрока через ключ перевода paxnet_err_<код>) ---
 const ERR_VERSION := "version"           # другая версия протокола
 const ERR_APP_VERSION := "app_version"   # версия (или id) мода-потребителя у гостя и хоста разная
+const ERR_LIB_VERSION := "lib_version"   # установленная PaxNet Core не подходит под требование мода-потребителя
+const ERR_BAD_REQUIREMENT := "bad_requirement"   # требование к версии библиотеки записано неверно
 const ERR_MODS := "mods"                 # наборы модов не совпали
 const ERR_FULL := "full"                 # лобби заполнено
 const ERR_CODE := "code"                 # нет такого кода / приглашения
