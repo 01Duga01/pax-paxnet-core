@@ -6,7 +6,7 @@ extends CanvasLayer
 # полоса передачи мира (игра при этом идёт) и понятная ошибка - что случилось и что нажать.
 # Работает с любой сессией net/Session.gd: PaxNetLib.overlay(session, parent).
 
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 ## net/Session.gd (или game/NetService.gd).
 var svc: Node = null

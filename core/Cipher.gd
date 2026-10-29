@@ -14,7 +14,7 @@ extends RefCounted
 # Секрет гостя «привязывается» к PIN (bind) до выводa всех ключей. Комнаты без PIN (общий код по сиду) от
 # активного посредника не защищены — секретом поделиться нечем.
 
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
 const BLOCK := 16
 const RSA_BITS := 1024

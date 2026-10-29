@@ -4,9 +4,9 @@ extends RefCounted
 #
 # Кадры рукопожатия: сборка, разбор, ключ звена. Отдельно от Handshake.gd, чтобы вложенные классы видели статику.
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Crc32 = preload("res://mods/paxnet/core/Crc32.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Crc32 = preload("res://mods/paxnet_core/core/Crc32.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
 const MAGIC := 0xA6
 

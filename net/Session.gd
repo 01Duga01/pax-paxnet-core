@@ -19,13 +19,13 @@ signal event(kind: String, data: Dictionary)
 ## Партия не удалась или закрыта: код Proto.ERR_* (перевод - paxnet_err_<код> и paxnet_err_<код>_do).
 signal failed(code: String)
 
-const HostSession = preload("res://mods/paxnet/core/HostSession.gd")
-const GuestSession = preload("res://mods/paxnet/core/GuestSession.gd")
-const PipeHost = preload("res://mods/paxnet/transport/PipeHost.gd")
-const PipeGuest = preload("res://mods/paxnet/transport/PipeGuest.gd")
-const Relay = preload("res://mods/paxnet/transport/Relay.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const BasicAdapter = preload("res://mods/paxnet/net/BasicAdapter.gd")
+const HostSession = preload("res://mods/paxnet_core/core/HostSession.gd")
+const GuestSession = preload("res://mods/paxnet_core/core/GuestSession.gd")
+const PipeHost = preload("res://mods/paxnet_core/transport/PipeHost.gd")
+const PipeGuest = preload("res://mods/paxnet_core/transport/PipeGuest.gd")
+const Relay = preload("res://mods/paxnet_core/transport/Relay.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const BasicAdapter = preload("res://mods/paxnet_core/net/BasicAdapter.gd")
 
 const HOST_ID: int = 1
 

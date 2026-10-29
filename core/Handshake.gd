@@ -14,18 +14,18 @@ extends RefCounted
 # Из секрета — ключ звена (подпись и AES-шифр пакетов, см. Cipher.gd) и ключ шифра info/welcome: ретранслятор
 # и сеть видят только шифртекст. Повтор CONNECT (потерялся ACCEPT) получает тот же ACCEPT. Кадр: [0xA6][тип][тело][crc32].
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Crc32 = preload("res://mods/paxnet/core/Crc32.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const Cipher = preload("res://mods/paxnet/core/Cipher.gd")
-const UdpLink = preload("res://mods/paxnet/core/UdpLink.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Crc32 = preload("res://mods/paxnet_core/core/Crc32.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const Cipher = preload("res://mods/paxnet_core/core/Cipher.gd")
+const UdpLink = preload("res://mods/paxnet_core/core/UdpLink.gd")
 
 const WINDOW_MS := 10000
 const HELLO_SIZE := 400        # не меньше CHALLENGE (в нём открытый ключ): ответ не больше запроса
 
 
-const Fr = preload("res://mods/paxnet/core/HsFrames.gd")
+const Fr = preload("res://mods/paxnet_core/core/HsFrames.gd")
 
 
 # ===================================================================== хост

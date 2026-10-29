@@ -1,7 +1,7 @@
-extends "res://mods/paxnet/core/Adapter.gd"
+extends "res://mods/paxnet_core/core/Adapter.gd"
 ## Мир из разделов-словарей для теста синхронизации (режим «мир считает хост»).
-const StateHash = preload("res://mods/paxnet/core/StateHash.gd")
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
+const StateHash = preload("res://mods/paxnet_core/core/StateHash.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
 var sections: Dictionary = {}
 var day: int = 0
 var installed: int = 0

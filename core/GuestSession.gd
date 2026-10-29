@@ -1,4 +1,4 @@
-extends "res://mods/paxnet/core/SessionBase.gd"
+extends "res://mods/paxnet_core/core/SessionBase.gd"
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
@@ -7,12 +7,12 @@ extends "res://mods/paxnet/core/SessionBase.gd"
 # выдерживает в ритме хоста (буфер против рывков сети), поэтому дата у гостя идёт ровно.
 # Связь пропала — сам переподключается в ту же партию за ту же страну.
 
-const Handshake = preload("res://mods/paxnet/core/Handshake.gd")
-const Xfer = preload("res://mods/paxnet/core/Xfer.gd")
-const Frag = preload("res://mods/paxnet/core/Frag.gd")
-const Delta = preload("res://mods/paxnet/core/Delta.gd")
-const AppChannel = preload("res://mods/paxnet/core/AppChannel.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
+const Handshake = preload("res://mods/paxnet_core/core/Handshake.gd")
+const Xfer = preload("res://mods/paxnet_core/core/Xfer.gd")
+const Frag = preload("res://mods/paxnet_core/core/Frag.gd")
+const Delta = preload("res://mods/paxnet_core/core/Delta.gd")
+const AppChannel = preload("res://mods/paxnet_core/core/AppChannel.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
 var state := "idle"              # idle | connecting | lobby | syncing | playing | reconnecting | failed | closed
 var key := ""

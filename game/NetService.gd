@@ -1,4 +1,4 @@
-extends "res://mods/paxnet/net/Session.gd"
+extends "res://mods/paxnet_core/net/Session.gd"
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
@@ -11,8 +11,8 @@ extends "res://mods/paxnet/net/Session.gd"
 # В библиотеке узел сети игры остаётся игровым: связь идёт его же каналом relay_pipe(), а партию
 # открывает мод, которому она нужна: PaxNetLib.world_service().host_open(...) / guest_join(...).
 
-const GameAdapter = preload("res://mods/paxnet/game/GameAdapter.gd")
-const Mailbox = preload("res://mods/paxnet/core/Mailbox.gd")
+const GameAdapter = preload("res://mods/paxnet_core/game/GameAdapter.gd")
+const Mailbox = preload("res://mods/paxnet_core/core/Mailbox.gd")
 
 signal lobby_changed
 signal connection_lost(why: String)
@@ -39,7 +39,7 @@ var _reload_pending: bool = false
 static func get_or_create(tree: SceneTree) -> Node:
 	var n: Node = tree.root.get_node_or_null(NODE_NAME)
 	if n == null:
-		var s: Variant = load("res://mods/paxnet/game/NetService.gd")
+		var s: Variant = load("res://mods/paxnet_core/game/NetService.gd")
 		n = (s as Script).new() as Node
 		n.name = NODE_NAME
 		tree.root.add_child.call_deferred(n)

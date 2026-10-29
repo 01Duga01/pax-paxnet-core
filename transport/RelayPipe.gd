@@ -52,7 +52,7 @@ static func game_network(from: Node) -> Object:
 ## Скрипт с прямым вызовом Network.relay_pipe() - или null, если в игре нет имени Network.
 static func _direct_script() -> Script:
 	# путь литералом: песочница игры пускает load() только с "res://mods/<id>/…"
-	var s: Variant = load("res://mods/paxnet/transport/GameRelay.gd")
+	var s: Variant = load("res://mods/paxnet_core/transport/GameRelay.gd")
 	if s is Script and (s as Script).can_instantiate():
 		return s as Script
 	return null

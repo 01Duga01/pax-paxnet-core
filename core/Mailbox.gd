@@ -6,7 +6,7 @@ extends RefCounted
 # приказы, поэтому исполняется ровно один раз и у всех в одном порядке; состояние входит в
 # сверку (раздел "mail"). Согласие нужно от адресата; война — одностороннее действие.
 
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 const KINDS := ["war", "peace", "alliance", "trade", "coruler", "letter"]
 const NEEDS_REPLY := ["peace", "alliance", "trade", "coruler"]

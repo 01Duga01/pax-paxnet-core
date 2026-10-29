@@ -1,4 +1,4 @@
-extends "res://mods/paxnet/core/Adapter.gd"
+extends "res://mods/paxnet_core/core/Adapter.gd"
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
@@ -10,8 +10,8 @@ extends "res://mods/paxnet/core/Adapter.gd"
 # Разделы — ключи записи мира сейва (WorldKeys.gd). Лечение — живое, по ключу, без перезагрузки
 # сцены; то, что живьём не ставится, — перезагрузкой мира (редко, NetService).
 
-const WorldKeys = preload("res://mods/paxnet/game/WorldKeys.gd")
-const StateHash = preload("res://mods/paxnet/core/StateHash.gd")
+const WorldKeys = preload("res://mods/paxnet_core/game/WorldKeys.gd")
+const StateHash = preload("res://mods/paxnet_core/core/StateHash.gd")
 const SeatsScript = preload("res://src/net/Seats.gd")
 const SaveScript = preload("res://src/save/Save.gd")
 

@@ -20,9 +20,9 @@ extends RefCounted
 # Время передаётся снаружи (now_ms), сокетов здесь нет: ядро одинаково работает на настоящем
 # UDP, в симуляторе сети тестов и (в виде StreamLink) поверх WebSocket.
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
-const Cipher = preload("res://mods/paxnet/core/Cipher.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
+const Cipher = preload("res://mods/paxnet_core/core/Cipher.gd")
 
 const MAGIC := 0xA7
 const HEADER := 14

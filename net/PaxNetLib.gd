@@ -4,7 +4,7 @@ extends Node
 #
 # ТОЧКА ВХОДА БИБЛИОТЕКИ ДЛЯ ДРУГИХ МОДОВ. Узел /root/PaxNetLib; ещё до входа в дерево он лежит в
 # метаданных корня: get_tree().root.get_meta("paxnet_lib"). Мод-потребитель пишет в mod.json
-# "depends": ["paxnet"] и берёт отсюда всё нужное - свои preload чужих файлов ему не нужны:
+# "depends": ["paxnet_core"] и берёт отсюда всё нужное - свои preload чужих файлов ему не нужны:
 #
 #   var lib: Node = Pax.get_tree().root.get_meta("paxnet_lib", null)
 #   var net: Node = lib.new_session()            # net/Session.gd: host / join / send / message
@@ -14,36 +14,36 @@ const VERSION: String = "1.0.0"
 const NODE_NAME: String = "PaxNetLib"
 const META: String = "paxnet_lib"
 
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const SharedRng = preload("res://mods/paxnet/core/SharedRng.gd")
-const StateHash = preload("res://mods/paxnet/core/StateHash.gd")
-const Relay = preload("res://mods/paxnet/transport/Relay.gd")
-const RelayPipe = preload("res://mods/paxnet/transport/RelayPipe.gd")
-const Session = preload("res://mods/paxnet/net/Session.gd")
-const NetOverlay = preload("res://mods/paxnet/ui/NetOverlay.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const SharedRng = preload("res://mods/paxnet_core/core/SharedRng.gd")
+const StateHash = preload("res://mods/paxnet_core/core/StateHash.gd")
+const Relay = preload("res://mods/paxnet_core/transport/Relay.gd")
+const RelayPipe = preload("res://mods/paxnet_core/transport/RelayPipe.gd")
+const Session = preload("res://mods/paxnet_core/net/Session.gd")
+const NetOverlay = preload("res://mods/paxnet_core/ui/NetOverlay.gd")
 
 ## Скрипты, которые библиотека отдаёт по имени (для наследования и new()).
 const SCRIPTS: Dictionary = {
-	"Proto": "res://mods/paxnet/core/Proto.gd",
-	"Bytes": "res://mods/paxnet/core/Bytes.gd",
-	"SharedRng": "res://mods/paxnet/core/SharedRng.gd",
-	"StateHash": "res://mods/paxnet/core/StateHash.gd",
-	"Delta": "res://mods/paxnet/core/Delta.gd",
-	"Crc32": "res://mods/paxnet/core/Crc32.gd",
-	"Hmac": "res://mods/paxnet/core/Hmac.gd",
-	"Adapter": "res://mods/paxnet/core/Adapter.gd",
-	"BasicAdapter": "res://mods/paxnet/net/BasicAdapter.gd",
-	"HostSession": "res://mods/paxnet/core/HostSession.gd",
-	"GuestSession": "res://mods/paxnet/core/GuestSession.gd",
-	"Mailbox": "res://mods/paxnet/core/Mailbox.gd",
-	"TimeAuthority": "res://mods/paxnet/core/TimeAuthority.gd",
-	"Relay": "res://mods/paxnet/transport/Relay.gd",
-	"RelayPipe": "res://mods/paxnet/transport/RelayPipe.gd",
-	"PipeHost": "res://mods/paxnet/transport/PipeHost.gd",
-	"PipeGuest": "res://mods/paxnet/transport/PipeGuest.gd",
-	"Session": "res://mods/paxnet/net/Session.gd",
-	"NetOverlay": "res://mods/paxnet/ui/NetOverlay.gd",
+	"Proto": "res://mods/paxnet_core/core/Proto.gd",
+	"Bytes": "res://mods/paxnet_core/core/Bytes.gd",
+	"SharedRng": "res://mods/paxnet_core/core/SharedRng.gd",
+	"StateHash": "res://mods/paxnet_core/core/StateHash.gd",
+	"Delta": "res://mods/paxnet_core/core/Delta.gd",
+	"Crc32": "res://mods/paxnet_core/core/Crc32.gd",
+	"Hmac": "res://mods/paxnet_core/core/Hmac.gd",
+	"Adapter": "res://mods/paxnet_core/core/Adapter.gd",
+	"BasicAdapter": "res://mods/paxnet_core/net/BasicAdapter.gd",
+	"HostSession": "res://mods/paxnet_core/core/HostSession.gd",
+	"GuestSession": "res://mods/paxnet_core/core/GuestSession.gd",
+	"Mailbox": "res://mods/paxnet_core/core/Mailbox.gd",
+	"TimeAuthority": "res://mods/paxnet_core/core/TimeAuthority.gd",
+	"Relay": "res://mods/paxnet_core/transport/Relay.gd",
+	"RelayPipe": "res://mods/paxnet_core/transport/RelayPipe.gd",
+	"PipeHost": "res://mods/paxnet_core/transport/PipeHost.gd",
+	"PipeGuest": "res://mods/paxnet_core/transport/PipeGuest.gd",
+	"Session": "res://mods/paxnet_core/net/Session.gd",
+	"NetOverlay": "res://mods/paxnet_core/ui/NetOverlay.gd",
 }
 
 ## PaxMod библиотеки: настройки и перевод.
@@ -87,27 +87,27 @@ func _load_named(name: String) -> Script:
 	var s: Variant = null
 	match name:
 		"Delta":
-			s = load("res://mods/paxnet/core/Delta.gd")
+			s = load("res://mods/paxnet_core/core/Delta.gd")
 		"Crc32":
-			s = load("res://mods/paxnet/core/Crc32.gd")
+			s = load("res://mods/paxnet_core/core/Crc32.gd")
 		"Hmac":
-			s = load("res://mods/paxnet/core/Hmac.gd")
+			s = load("res://mods/paxnet_core/core/Hmac.gd")
 		"Adapter":
-			s = load("res://mods/paxnet/core/Adapter.gd")
+			s = load("res://mods/paxnet_core/core/Adapter.gd")
 		"BasicAdapter":
-			s = load("res://mods/paxnet/net/BasicAdapter.gd")
+			s = load("res://mods/paxnet_core/net/BasicAdapter.gd")
 		"HostSession":
-			s = load("res://mods/paxnet/core/HostSession.gd")
+			s = load("res://mods/paxnet_core/core/HostSession.gd")
 		"GuestSession":
-			s = load("res://mods/paxnet/core/GuestSession.gd")
+			s = load("res://mods/paxnet_core/core/GuestSession.gd")
 		"Mailbox":
-			s = load("res://mods/paxnet/core/Mailbox.gd")
+			s = load("res://mods/paxnet_core/core/Mailbox.gd")
 		"TimeAuthority":
-			s = load("res://mods/paxnet/core/TimeAuthority.gd")
+			s = load("res://mods/paxnet_core/core/TimeAuthority.gd")
 		"PipeHost":
-			s = load("res://mods/paxnet/transport/PipeHost.gd")
+			s = load("res://mods/paxnet_core/transport/PipeHost.gd")
 		"PipeGuest":
-			s = load("res://mods/paxnet/transport/PipeGuest.gd")
+			s = load("res://mods/paxnet_core/transport/PipeGuest.gd")
 	return s as Script if s is Script else null
 
 
@@ -131,7 +131,7 @@ func new_session(parent: Node = null) -> Node:
 func world_service() -> Node:
 	if not is_inside_tree():
 		return null
-	var s: Variant = load("res://mods/paxnet/game/NetService.gd")
+	var s: Variant = load("res://mods/paxnet_core/game/NetService.gd")
 	if not (s is Script) or not (s as Script).can_instantiate():
 		push_warning("[paxnet] world service unavailable in this game version")
 		return null

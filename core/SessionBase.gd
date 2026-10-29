@@ -15,13 +15,13 @@ extends RefCounted
 #   ai  итоги нейросети (рассказ и исход) — одни на всех
 #   h   суммы разделов мира после шага: name → u32 (гость сверяет и при расхождении просит лечить)
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const StateHash = preload("res://mods/paxnet/core/StateHash.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const Mailbox = preload("res://mods/paxnet/core/Mailbox.gd")
-const TimeAuthority = preload("res://mods/paxnet/core/TimeAuthority.gd")
-const SharedRng = preload("res://mods/paxnet/core/SharedRng.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const StateHash = preload("res://mods/paxnet_core/core/StateHash.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const Mailbox = preload("res://mods/paxnet_core/core/Mailbox.gd")
+const TimeAuthority = preload("res://mods/paxnet_core/core/TimeAuthority.gd")
+const SharedRng = preload("res://mods/paxnet_core/core/SharedRng.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
 var adapter
 var tick := 0                    # последний применённый шаг

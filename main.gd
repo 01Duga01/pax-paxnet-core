@@ -5,9 +5,9 @@ extends PaxMod
 # PaxNet - мод-библиотека сетевой игры для других модов: комнаты на ретрансляторе игры по коду и
 # приглашению, лобби, время, сообщения ровно один раз через обрывы, переподключение, сверка мира по
 # суммам и тихое лечение по разделам. Сам по себе игру не меняет: партию открывает мод, которому она
-# нужна (mod.json: "depends": ["paxnet"]). Устройство и API - README.md.
+# нужна (mod.json: "depends": ["paxnet_core"]). Устройство и API - README.md.
 
-const PaxNetLib = preload("res://mods/paxnet/net/PaxNetLib.gd")
+const PaxNetLib = preload("res://mods/paxnet_core/net/PaxNetLib.gd")
 
 var lib: Node = null
 

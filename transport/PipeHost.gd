@@ -8,10 +8,10 @@ extends RefCounted
 # 2.., его «адрес» для сессии - "pipe#<номер>". Звено узнаётся по подписи на любом адресе, поэтому
 # гость, переоткрывший канал под новым номером, продолжает то же звено без нового рукопожатия.
 
-const RelayPipe = preload("res://mods/paxnet/transport/RelayPipe.gd")
-const Relay = preload("res://mods/paxnet/transport/Relay.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const Cipher = preload("res://mods/paxnet/core/Cipher.gd")
+const RelayPipe = preload("res://mods/paxnet_core/transport/RelayPipe.gd")
+const Relay = preload("res://mods/paxnet_core/transport/Relay.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const Cipher = preload("res://mods/paxnet_core/core/Cipher.gd")
 
 ## Канал игры доставляет надёжно и по порядку: повторы звена почти не нужны, держим их редкими.
 const LINK_TUNE: Dictionary = {"timeout_ms": 15000, "keepalive_ms": 500, "min_rto_ms": 400, "max_rto_ms": 4000}

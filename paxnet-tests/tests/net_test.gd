@@ -3,8 +3,8 @@ extends Node
 
 const FakeRelay = preload("res://tests/FakeRelay.gd")
 const ToyAdapter = preload("res://tests/ToyAdapter.gd")
-const PaxNetLib = preload("res://mods/paxnet/net/PaxNetLib.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const PaxNetLib = preload("res://mods/paxnet_core/net/PaxNetLib.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 var relay: FakeRelay = FakeRelay.new()
 var lib: Node = null

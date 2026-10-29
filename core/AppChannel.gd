@@ -8,9 +8,9 @@ extends RefCounted
 # доходит ровно один раз, даже если связь рвалась посередине (раньше: «приказ отдан, но не исполнен»).
 # Большие сообщения сжимаются и едут частями (Frag).
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const Frag = preload("res://mods/paxnet/core/Frag.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const Frag = preload("res://mods/paxnet_core/core/Frag.gd")
 
 const COMPRESS_FROM := 4096
 const MAX_UNPACK := 4 << 20      # предел размера после распаковки (хост берёт свой из cfg)

@@ -9,9 +9,9 @@ extends RefCounted
 # карта следующих 64»; пропавшее досылается выборочно. Окно растёт, пока доходит, и сжимается
 # при потерях. Игра в это время идёт: шаги мира для получателя копятся в очереди, а не теряются.
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Crc32 = preload("res://mods/paxnet/core/Crc32.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Crc32 = preload("res://mods/paxnet_core/core/Crc32.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 const CHUNK_DATAGRAM := 1000
 const CHUNK_STREAM := 16000

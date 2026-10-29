@@ -6,7 +6,7 @@ extends RefCounted
 # (например «D3EF5YXQ»). Приглашения: https://mp.paxuniverse.ru/j/КОД и paxuniverse://join/КОД - их
 # понимает и сама игра. Общий код по сиду: одинаков у всех игроков (комната дня, турнир, сервер мода).
 
-const SharedRng = preload("res://mods/paxnet/core/SharedRng.gd")
+const SharedRng = preload("res://mods/paxnet_core/core/SharedRng.gd")
 
 const CODE_ALPHABET: String = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 const LINK_PREFIX: String = "https://mp.paxuniverse.ru/j/"

@@ -1,4 +1,4 @@
-extends "res://mods/paxnet/core/SessionBase.gd"
+extends "res://mods/paxnet_core/core/SessionBase.gd"
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
@@ -7,12 +7,12 @@ extends "res://mods/paxnet/core/SessionBase.gd"
 # время, переподключение, сохранение. Сокетов не знает: ему дают датагаммы (UDP через Listener)
 # или готовые звенья (WebSocket через admit_stream).
 
-const Handshake = preload("res://mods/paxnet/core/Handshake.gd")
-const UdpLink = preload("res://mods/paxnet/core/UdpLink.gd")
-const Xfer = preload("res://mods/paxnet/core/Xfer.gd")
-const Frag = preload("res://mods/paxnet/core/Frag.gd")
-const Delta = preload("res://mods/paxnet/core/Delta.gd")
-const AppChannel = preload("res://mods/paxnet/core/AppChannel.gd")
+const Handshake = preload("res://mods/paxnet_core/core/Handshake.gd")
+const UdpLink = preload("res://mods/paxnet_core/core/UdpLink.gd")
+const Xfer = preload("res://mods/paxnet_core/core/Xfer.gd")
+const Frag = preload("res://mods/paxnet_core/core/Frag.gd")
+const Delta = preload("res://mods/paxnet_core/core/Delta.gd")
+const AppChannel = preload("res://mods/paxnet_core/core/AppChannel.gd")
 
 const HOST_ID := 1
 const MAX_ACTION_BYTES := 700
