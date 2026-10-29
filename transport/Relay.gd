@@ -14,11 +14,12 @@ const PREFIXES: Array = ["https://mp.paxuniverse.ru/j/", "http://mp.paxuniverse.
 	"paxuniverse://join/", "pax://join/"]
 const MIN_LEN: int = 4
 const MAX_LEN: int = 12
+const PIN_LEN: int = 12
 
 
 ## Код из того, что ввёл игрок: «ABCD2345», «PAX-…», ссылка или paxuniverse://join/КОД. "" - не код.
 static func parse_code(s0: String) -> String:
-	var s: String = s0.strip_edges()
+	var s: String = s0.strip_edges().split("#")[0]
 	for prefix in PREFIXES:
 		var pre: String = str(prefix)
 		if s.begins_with(pre):
@@ -32,8 +33,33 @@ static func parse_code(s0: String) -> String:
 	return up
 
 
-static func invite_link(code: String) -> String:
-	return (LINK_PREFIX + code) if code != "" else ""
+## PIN приглашения (после «#»): 12 знаков алфавита кодов. "" - нет или записан неверно.
+static func parse_pin(s0: String) -> String:
+	var parts: PackedStringArray = s0.strip_edges().split("#")
+	if parts.size() < 2:
+		return ""
+	var up: String = parts[1].to_upper().replace("-", "").replace(" ", "")
+	if up.length() != PIN_LEN:
+		return ""
+	for i in range(up.length()):
+		if not CODE_ALPHABET.contains(up[i]):
+			return ""
+	return up
+
+
+## Новый PIN (60 бит). Случайность - от системы, не от PCG32 мода.
+static func new_pin(random_bytes: PackedByteArray) -> String:
+	var s: String = ""
+	for i in range(PIN_LEN):
+		s += CODE_ALPHABET[int(random_bytes[i]) & 31]
+	return s
+
+
+## Ссылка-приглашение. PIN идёт после «#»: на сервер при открытии ссылки в браузере он не попадает.
+static func invite_link(code: String, pin: String = "") -> String:
+	if code == "":
+		return ""
+	return LINK_PREFIX + code + (("#" + pin) if pin != "" else "")
 
 
 ## Общий код комнаты: одинаков у всех, у кого совпали seed и stream (PCG32, не зависит от движка).

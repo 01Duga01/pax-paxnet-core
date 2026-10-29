@@ -17,6 +17,7 @@ const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
 var state := "idle"              # idle | connecting | lobby | syncing | playing | reconnecting | failed | closed
 var key := ""
 var name := "?"
+var pin := ""                    # PIN приглашения: защита от подмены ключа на ретрансляторе
 var room_code := ""              # код комнаты: из него и ключа игрока выводится ключ для этой комнаты
 var extra_info := {}             # mods, code, game_ver…
 var send_fn: Callable            # (bytes) — датаграмма хосту (UDP или через ретранслятор)
@@ -88,6 +89,7 @@ func connect_udp(now_ms: int) -> void:
 	dialer.on_connected = func(l, w): _on_connected(l, w)
 	dialer.on_failed = func(code): _on_failed(code)
 	dialer.link_tune = link_tune
+	dialer.pin = pin
 	if state != "reconnecting":
 		state = "connecting"
 	dialer.start(now_ms, _info())

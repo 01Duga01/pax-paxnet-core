@@ -47,6 +47,7 @@ func open(owner: Node, target: String, now_ms: int) -> String:
 	if code == "":
 		return Proto.ERR_CODE
 	session.set("room_code", code)
+	session.set("pin", Relay.parse_pin(target))
 	session.set("send_fn", Callable(self, "_send"))
 	var tune: Dictionary = session.get("link_tune")
 	tune.merge(PipeHost.LINK_TUNE, true)

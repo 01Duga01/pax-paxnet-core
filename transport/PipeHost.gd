@@ -11,6 +11,7 @@ extends RefCounted
 const RelayPipe = preload("res://mods/paxnet/transport/RelayPipe.gd")
 const Relay = preload("res://mods/paxnet/transport/Relay.gd")
 const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const Cipher = preload("res://mods/paxnet/core/Cipher.gd")
 
 ## Канал игры доставляет надёжно и по порядку: повторы звена почти не нужны, держим их редкими.
 const LINK_TUNE: Dictionary = {"timeout_ms": 15000, "keepalive_ms": 500, "min_rto_ms": 400, "max_rto_ms": 4000}
@@ -33,6 +34,11 @@ var fail_code: String = ""
 var room_code: String = ""
 ## Код, который хотим получить (продолжение сохранённой партии под тем же кодом).
 var want_code: String = ""
+## PIN приглашения (см. Cipher.bind) и прежний PIN при продолжении партии. pinned = false - комната без PIN
+## (общий код по сиду: приглашённым нечем делиться секретом).
+var pin: String = ""
+var want_pin: String = ""
+var pinned: bool = true
 var stats: Dictionary = {"in": 0, "out": 0, "bytes_in": 0, "bytes_out": 0, "reopened": 0}
 
 var _owner: Node = null
@@ -49,6 +55,11 @@ func open(owner: Node, opts: Dictionary, now_ms: int) -> String:
 	_owner = owner
 	_now = now_ms
 	session.set("send_to", Callable(self, "_send_to"))
+	if pinned:
+		pin = want_pin if want_pin != "" else Relay.new_pin(Cipher.random_bytes(Relay.PIN_LEN))
+	else:
+		pin = ""
+	session.set("pin", pin)
 	var tune: Dictionary = session.get("link_tune")
 	tune.merge(LINK_TUNE, true)
 	_first = {"op": "host", "name": str(opts.get("name", "")), "public": bool(opts.get("public", false)),
@@ -78,7 +89,12 @@ func close() -> void:
 
 
 func invite_link() -> String:
-	return Relay.invite_link(room_code)
+	return Relay.invite_link(room_code, pin)
+
+
+## Код с PIN для ручного ввода: «КОД#PIN».
+func invite_code() -> String:
+	return (room_code + "#" + pin) if pin != "" else room_code
 
 
 func _status(kind: String, data: Dictionary = {}) -> void:

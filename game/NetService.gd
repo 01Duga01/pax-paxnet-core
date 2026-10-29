@@ -87,7 +87,7 @@ func host_open(display_name_: String, rules: Dictionary = {}) -> String:
 		"join_in_progress": bool(rules.get("join_in_progress", settings["join_in_progress"])),
 		"allow_coruler": bool(rules.get("allow_coruler", settings["allow_coruler"])),
 		"max_players": int(rules.get("max_players", settings["max_players"])), "mods": str(rules.get("mods", "")),
-		"preset": "paxnet_world", "want_code": str(resume_state.get("code", ""))}
+		"preset": "paxnet_world", "want_code": str(resume_state.get("code", "")), "want_pin": str(resume_state.get("pin", ""))}
 	var ad: Object = GameAdapter.new()
 	ad.set("service", self)
 	var err: String = host(display_name_, ad, cfg)

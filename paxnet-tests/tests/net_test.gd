@@ -77,9 +77,11 @@ func test_lobby_and_messages() -> void:
 	ok(await wait_until(func() -> bool: return str(h.get("status")) == "lobby"), "хост в лобби")
 	var code: String = str(h.call("code"))
 	ok(code.length() == 8, "код комнаты " + code)
-	ok(str(h.call("invite_link")).ends_with("/j/" + code), "ссылка-приглашение")
-	ok(str(a.call("join", "https://mp.paxuniverse.ru/j/" + code, "Аня")) == "", "гость A входит по ссылке")
-	ok(str(b.call("join", "pax-" + code.to_lower(), "Борис")) == "", "гость B входит по коду PAX-…")
+	var pin: String = str(h.call("pin"))
+	ok(pin.length() == 12, "PIN приглашения " + pin)
+	ok(str(h.call("invite_link")).ends_with("/j/" + code + "#" + pin), "ссылка-приглашение")
+	ok(str(a.call("join", str(h.call("invite_link")), "Аня")) == "", "гость A входит по ссылке")
+	ok(str(b.call("join", "pax-" + code.to_lower() + "#" + pin.to_lower(), "Борис")) == "", "гость B входит по коду PAX-…")
 	ok(await wait_until(func() -> bool: return str(a.get("status")) == "lobby" and str(b.get("status")) == "lobby"), "оба гостя в лобби")
 	ok(await wait_until(func() -> bool: return (h.call("players") as Array).size() == 3 and (a.call("players") as Array).size() == 3 and (b.call("players") as Array).size() == 3), "у всех трое в составе")
 	var aid: int = int(a.call("my_id"))
@@ -160,7 +162,7 @@ func test_world_sync() -> void:
 	await get_tree().process_frame
 	h.call("host", "Хост", hw, {"authority": true, "external_time": true, "push_min_ms": 0})
 	await wait_until(func() -> bool: return str(h.get("status")) == "lobby")
-	g.call("join", str(h.call("code")), "Гость", gw)
+	g.call("join", str(h.call("invite_code")), "Гость", gw)
 	ok(await wait_until(func() -> bool: return str(g.get("status")) == "lobby"), "гость в лобби")
 	g.call("choose_seat", 1)
 	h.call("choose_seat", 0)
@@ -196,7 +198,7 @@ func test_world_sync() -> void:
 	g2.set("player_key", "key-g")
 	await get_tree().process_frame
 	var gw2: ToyAdapter = ToyAdapter.new()
-	g2.call("join", str(h.call("code")), "Гость", gw2)
+	g2.call("join", str(h.call("invite_code")), "Гость", gw2)
 	ok(await wait_until(func() -> bool: return str(g2.get("status")) == "playing" and gw2.sections == hw.sections), "вернулся после перезапуска: тот же мир")
 	var seat: int = -1
 	for p in h.call("players"):

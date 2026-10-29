@@ -32,6 +32,7 @@ const Fr = preload("res://mods/paxnet/core/HsFrames.gd")
 
 class Listener extends RefCounted:
 	var secret := PackedByteArray()
+	var pin := ""                # PIN приглашения ("" — комната без защиты от посредника)
 	var rsa: CryptoKey = null
 	var pem := PackedByteArray()
 	var send_to: Callable        # (endpoint: String, bytes) -> void
@@ -115,6 +116,7 @@ class Listener extends RefCounted:
 				var sec := Cipher.unwrap_secret(rsa, wrapped)
 				if sec.is_empty():
 					return
+				sec = Cipher.bind(sec, pin)
 				var plain = Cipher.open_mac(sec, "pax-hs-c", sealed_info)
 				if plain == null:
 					return
@@ -162,6 +164,7 @@ class Dialer extends RefCounted:
 	var retry_ms := 250
 	var give_up_ms := 8000
 	var link_tune := {}          # настройки нового звена от транспорта
+	var pin := ""                # PIN из приглашения
 	var _nonce := 0
 	var _cookie := PackedByteArray()
 	var _window := 0
@@ -218,10 +221,11 @@ class Dialer extends RefCounted:
 				var pub := r.bytes()
 				if not r.ok or n != _nonce:
 					return
-				_secret = Cipher.random_bytes(Cipher.SECRET_LEN)
-				var wrapped := Cipher.wrap_secret(pub, _secret)
+				var raw_secret := Cipher.random_bytes(Cipher.SECRET_LEN)
+				var wrapped := Cipher.wrap_secret(pub, raw_secret)
 				if wrapped.is_empty():
 					return
+				_secret = Cipher.bind(raw_secret, pin)
 				_connect = Bytes.W.new().bytes(wrapped).bytes(Cipher.seal_mac(_secret, "pax-hs-c", Bytes.W.new().variant(info).buf)).buf
 				_cookie = ck
 				_window = win

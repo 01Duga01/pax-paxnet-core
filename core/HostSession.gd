@@ -83,6 +83,11 @@ var _waiting_note_ms := 0
 var host_name := "?"
 var host_key := "host"
 var host_seat := -1
+var pin := "":                   # PIN приглашения; гость без него не пройдёт рукопожатие
+	set(v):
+		pin = v
+		if listener != null:
+			listener.pin = v
 
 
 func _init(adapter_, cfg_: Dictionary = {}) -> void:

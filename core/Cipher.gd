@@ -9,8 +9,10 @@ extends RefCounted
 #   гость   : случайный секрет на 32 байта, шлёт его хосту под RSA; из секрета — ключ звена и ключ рукопожатия;
 #   дальше  : info (ключ игрока, имя) и welcome шифруются секретом, пакеты звена — AES-CBC + подпись (шифруй, потом подписывай).
 #
-# Ретранслятор и сеть между сторонами видят только шифртекст. Против того, кто ПОДМЕНЯЕТ открытый ключ на лету
-# (активный посредник), защиты нет: у сторон нет заранее известного общего секрета, а код комнаты знает и ретранслятор.
+# Ретранслятор и сеть между сторонами видят только шифртекст. От посредника, подменяющего открытый ключ на лету,
+# защищает PIN приглашения (12 знаков, 60 бит): он есть у хоста и приглашённых, но не уходит на ретранслятор.
+# Секрет гостя «привязывается» к PIN (bind) до выводa всех ключей. Комнаты без PIN (общий код по сиду) от
+# активного посредника не защищены — секретом поделиться нечем.
 
 const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
 
@@ -53,6 +55,14 @@ static func unwrap_secret(k: CryptoKey, wrapped: PackedByteArray) -> PackedByteA
 		return PackedByteArray()
 	var s: PackedByteArray = _rng.decrypt(k, wrapped)
 	return s if s.size() == SECRET_LEN else PackedByteArray()
+
+
+## Секрет, привязанный к PIN приглашения. PIN не уходит ни на ретранслятор, ни в сеть: кто подменил открытый
+## ключ, PIN не знает и не может ни прочитать, ни подписать ничего. Пустой PIN — без защиты от активного посредника.
+static func bind(secret: PackedByteArray, pin: String) -> PackedByteArray:
+	if pin == "":
+		return secret
+	return Hmac.mac(secret, ("pax-pin|" + pin).to_utf8_buffer())
 
 
 static func derive(key: PackedByteArray, label: String) -> PackedByteArray:

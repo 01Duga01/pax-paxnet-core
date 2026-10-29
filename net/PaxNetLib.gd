@@ -198,8 +198,13 @@ func parse_code(s: String) -> String:
 	return Relay.parse_code(s)
 
 
-func invite_link(code: String) -> String:
-	return Relay.invite_link(code)
+func invite_link(code: String, pin: String = "") -> String:
+	return Relay.invite_link(code, pin)
+
+
+## PIN из приглашения («КОД#PIN» или ссылки).
+func parse_pin(s: String) -> String:
+	return Relay.parse_pin(s)
 
 
 ## Общий код комнаты по сиду (например, комната дня: lib.shared_code(lib.utc_day(), "my_mod/daily", "MM")).

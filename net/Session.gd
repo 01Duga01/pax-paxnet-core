@@ -77,7 +77,7 @@ func host(name: String, adapter_: Object = null, cfg: Dictionary = {}) -> String
 	c.merge(cfg, true)
 	var core: Dictionary = c.duplicate()
 	core["name"] = str(c["room_name"]) if str(c["room_name"]) != "" else name
-	for k in ["room_name", "public", "preset", "want_code"]:
+	for k in ["room_name", "public", "preset", "want_code", "want_pin", "pinned"]:
 		core.erase(k)
 	session = HostSession.new(adapter, core)
 	session.set("host_name", name)
@@ -89,6 +89,8 @@ func host(name: String, adapter_: Object = null, cfg: Dictionary = {}) -> String
 	transport.set("session", session)
 	transport.set("pipe_factory", pipe_factory)
 	transport.set("want_code", str(c.get("want_code", "")))
+	transport.set("want_pin", str(c.get("want_pin", "")))
+	transport.set("pinned", bool(c.get("pinned", true)))
 	transport.set("on_status", Callable(self, "_on_transport_status"))
 	var err: String = str(transport.call("open", self, {"name": core["name"], "public": bool(c["public"]),
 		"max": int(c["max_players"]), "preset": str(c["preset"]), "host_name": name}, _now()))
@@ -212,8 +214,18 @@ func code() -> String:
 	return str(transport.get("room_code")) if role == "host" else str(transport.get("code"))
 
 
+## PIN приглашения (только у хоста): без него приглашённый не пройдёт рукопожатие.
+func pin() -> String:
+	return str(transport.get("pin")) if transport != null and role == "host" else ""
+
+
 func invite_link() -> String:
-	return Relay.invite_link(code())
+	return Relay.invite_link(code(), pin())
+
+
+## «КОД#PIN» для ручного ввода и показа.
+func invite_code() -> String:
+	return code() + (("#" + pin()) if pin() != "" else "")
 
 
 ## [{id, name, seat, role, ready, ai, ping, host, away}]
