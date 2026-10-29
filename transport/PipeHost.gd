@@ -56,7 +56,11 @@ func open(owner: Node, opts: Dictionary, now_ms: int) -> String:
 	_now = now_ms
 	session.set("send_to", Callable(self, "_send_to"))
 	if pinned:
-		pin = want_pin if want_pin != "" else Relay.new_pin(Cipher.random_bytes(Relay.PIN_LEN))
+		# секретная часть переживает перезапуск, отпечаток ключа - нет: ключ хоста создаётся заново при запуске
+		var fp: String = Cipher.fingerprint(Cipher.public_pem(Cipher.host_key()))
+		var secret_part: String = want_pin.substr(0, Relay.PIN_SECRET_LEN) if want_pin.length() == Relay.PIN_LEN \
+			else Relay.new_secret(Cipher.random_bytes(Relay.PIN_SECRET_LEN))
+		pin = secret_part + fp
 	else:
 		pin = ""
 	session.set("pin", pin)

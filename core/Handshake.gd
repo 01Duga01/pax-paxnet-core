@@ -22,6 +22,7 @@ const Cipher = preload("res://mods/paxnet_core/core/Cipher.gd")
 const UdpLink = preload("res://mods/paxnet_core/core/UdpLink.gd")
 
 const WINDOW_MS := 10000
+const PIN_TOTAL := 24          # длина PIN приглашения (см. Relay.PIN_LEN); последние FP_LEN знаков - отпечаток ключа хоста
 const HELLO_SIZE := 400        # не меньше CHALLENGE (в нём открытый ключ): ответ не больше запроса
 
 
@@ -252,6 +253,12 @@ class Dialer extends RefCounted:
 				var ck := r.raw_n(16)
 				var pub := r.bytes()
 				if not r.ok or n != _nonce:
+					return
+				# Приглашение несёт отпечаток ключа хоста: чужой (подставленный) ключ отвергаем до отправки секрета.
+				if pin.length() == PIN_TOTAL and Cipher.fingerprint(pub) != pin.substr(PIN_TOTAL - Cipher.FP_LEN):
+					state = "failed"
+					if on_failed.is_valid():
+						on_failed.call(Proto.ERR_PIN)
 					return
 				var raw_secret := Cipher.random_bytes(Cipher.SECRET_LEN)
 				var wrapped := Cipher.wrap_secret(pub, raw_secret)

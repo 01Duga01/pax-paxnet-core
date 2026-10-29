@@ -42,6 +42,8 @@
 	"paxnet_err_desync": "Your world diverged from the host's and did not repair itself.",
 	"paxnet_err_desync_do": "Press «Join again» — the world arrives in a few seconds.",
 	"paxnet_err_no_route": "The host does not answer.",
+	"paxnet_err_pin": "The host's key does not match your invite: someone may be intercepting the connection, or the invite is from an old game.",
+	"paxnet_err_pin_do": "Do not join. Ask the host for a fresh invite over a channel you trust.",
 	"paxnet_err_no_route_do": "Press «Join again»: the game enters the room through the relay once more.",
 	"paxnet_err_relay": "The Pax Universe relay is unavailable.",
 	"paxnet_err_relay_do": "Check your internet and the game version, then try again in a minute.",

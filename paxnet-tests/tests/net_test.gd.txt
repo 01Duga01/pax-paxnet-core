@@ -78,7 +78,7 @@ func test_lobby_and_messages() -> void:
 	var code: String = str(h.call("code"))
 	ok(code.length() == 8, "код комнаты " + code)
 	var pin: String = str(h.call("pin"))
-	ok(pin.length() == 12, "PIN приглашения " + pin)
+	ok(pin.length() == 24, "PIN приглашения " + pin)
 	ok(str(h.call("invite_link")).ends_with("/j/" + code + "#" + pin), "ссылка-приглашение")
 	ok(str(a.call("join", str(h.call("invite_link")), "Аня")) == "", "гость A входит по ссылке")
 	ok(str(b.call("join", "pax-" + code.to_lower() + "#" + pin.to_lower(), "Борис")) == "", "гость B входит по коду PAX-…")

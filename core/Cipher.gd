@@ -33,6 +33,23 @@ static func host_key() -> CryptoKey:
 	return _host_key
 
 
+const FP_ALPHABET := "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+const FP_LEN := 12
+
+
+## Отпечаток открытого ключа хоста (60 бит, знаки алфавита кодов). Едет в приглашении: гость сверяет ключ хоста,
+## поэтому ретранслятор не может подставить свой ключ, а перебирать PIN по перехваченным данным нечем.
+static func fingerprint(pem: PackedByteArray) -> String:
+	var h := HashingContext.new()
+	h.start(HashingContext.HASH_SHA256)
+	h.update(pem)
+	var d: PackedByteArray = h.finish()
+	var s := ""
+	for i in FP_LEN:
+		s += FP_ALPHABET[int(d[i]) & 31]
+	return s
+
+
 static func public_pem(k: CryptoKey) -> PackedByteArray:
 	return k.save_to_string(true).to_utf8_buffer()
 

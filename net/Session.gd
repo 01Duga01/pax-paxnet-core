@@ -25,6 +25,7 @@ const PipeHost = preload("res://mods/paxnet_core/transport/PipeHost.gd")
 const PipeGuest = preload("res://mods/paxnet_core/transport/PipeGuest.gd")
 const Relay = preload("res://mods/paxnet_core/transport/Relay.gd")
 const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 const BasicAdapter = preload("res://mods/paxnet_core/net/BasicAdapter.gd")
 
 const HOST_ID: int = 1
@@ -64,6 +65,12 @@ func _key() -> String:
 	return player_key
 
 
+# Ключ записи самого хоста в списке игроков (и в файле сохранения): производный, а не сам ключ игрока, чтобы
+# сохранение, которым поделились, не раскрывало постоянный ключ.
+func _host_roster_key() -> String:
+	return Hmac.mac("pax-host".to_utf8_buffer(), _key().to_utf8_buffer()).hex_encode().substr(0, 32)
+
+
 # ------------------------------------------------------------------ хост
 
 ## Открыть комнату. cfg - правила лобби (max_players, time_mode "host"|"vote", join_in_progress,
@@ -81,7 +88,7 @@ func host(name: String, adapter_: Object = null, cfg: Dictionary = {}) -> String
 		core.erase(k)
 	session = HostSession.new(adapter, core)
 	session.set("host_name", name)
-	session.set("host_key", _key())
+	session.set("host_key", _host_roster_key())
 	session.set("on_event", Callable(self, "_on_host_event"))
 	session.set("on_app", Callable(self, "_on_app"))
 	_prepare_host(c)

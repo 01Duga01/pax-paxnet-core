@@ -14,7 +14,9 @@ const PREFIXES: Array = ["https://mp.paxuniverse.ru/j/", "http://mp.paxuniverse.
 	"paxuniverse://join/", "pax://join/"]
 const MIN_LEN: int = 4
 const MAX_LEN: int = 12
-const PIN_LEN: int = 12
+## PIN приглашения: 12 знаков секрета (кто вошёл) + 12 знаков отпечатка ключа хоста (кому доверять).
+const PIN_SECRET_LEN: int = 12
+const PIN_LEN: int = 24
 
 
 ## Код из того, что ввёл игрок: «ABCD2345», «PAX-…», ссылка или paxuniverse://join/КОД. "" - не код.
@@ -33,7 +35,7 @@ static func parse_code(s0: String) -> String:
 	return up
 
 
-## PIN приглашения (после «#»): 12 знаков алфавита кодов. "" - нет или записан неверно.
+## PIN приглашения (после «#»): PIN_LEN знаков алфавита кодов. "" - нет или записан неверно.
 static func parse_pin(s0: String) -> String:
 	var parts: PackedStringArray = s0.strip_edges().split("#")
 	if parts.size() < 2:
@@ -47,10 +49,10 @@ static func parse_pin(s0: String) -> String:
 	return up
 
 
-## Новый PIN (60 бит). Случайность - от системы, не от PCG32 мода.
-static func new_pin(random_bytes: PackedByteArray) -> String:
+## Секретная часть PIN (60 бит). Случайность - от системы, не от PCG32 мода.
+static func new_secret(random_bytes: PackedByteArray) -> String:
 	var s: String = ""
-	for i in range(PIN_LEN):
+	for i in range(PIN_SECRET_LEN):
 		s += CODE_ALPHABET[int(random_bytes[i]) & 31]
 	return s
 
