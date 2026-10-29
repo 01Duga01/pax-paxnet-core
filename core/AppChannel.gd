@@ -14,7 +14,8 @@ const Frag = preload("res://mods/paxnet_core/core/Frag.gd")
 
 const COMPRESS_FROM := 4096
 const MAX_UNPACK := 4 << 20      # предел размера после распаковки (хост берёт свой из cfg)
-const MAX_WINDOW := 1024         # насколько вперёд от in_seq принимаем номера не по порядку
+const MAX_WINDOW := 1024
+const MAX_NODES := 400000        # значений в одном сообщении после разбора (стоимость разбора - по элементам)         # насколько вперёд от in_seq принимаем номера не по порядку
 
 var next_seq := 1
 var out := {}                    # seq → тело (готовое к отправке)
@@ -23,6 +24,7 @@ var _hold := {}                  # пришедшие раньше времен�
 var _acked_sent := -1
 var max_unpack := MAX_UNPACK
 var max_window := MAX_WINDOW
+var max_nodes := MAX_NODES
 var violated := false            # собеседник нарушил предел: звено пора рвать
 
 
@@ -94,7 +96,7 @@ func on_msg(body: PackedByteArray) -> Array:
 			violated = true
 			return []
 		raw = body.slice(1)
-	var d := Bytes.decode(raw)
+	var d := Bytes.decode(raw, max_nodes)
 	if not d["ok"] or not (d["v"] is Dictionary):
 		return []
 	var m: Dictionary = d["v"]

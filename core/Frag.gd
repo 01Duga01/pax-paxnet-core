@@ -14,6 +14,8 @@ var _mid := -1
 var _type := 0
 var _parts: Array = []
 var _n := 0
+var _bytes := 0
+const MAX_TOTAL := 8 << 20       # всего в собираемом сообщении, байт
 
 
 static func send(link, type: int, body: PackedByteArray) -> bool:
@@ -46,10 +48,17 @@ func feed(body: PackedByteArray) -> Array:
 		_type = type
 		_n = n
 		_parts = []
+		_bytes = 0
 	if i != _parts.size():
 		_mid = -1
 		return []   # порядок гарантирует звено; иначе — мусор
-	_parts.append(r.rest())
+	var piece := r.rest()
+	_bytes += piece.size()
+	if _bytes > MAX_TOTAL:
+		_mid = -1
+		_parts = []
+		return []
+	_parts.append(piece)
 	if _parts.size() < _n:
 		return []
 	var all := PackedByteArray()

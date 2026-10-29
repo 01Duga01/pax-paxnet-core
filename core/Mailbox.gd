@@ -66,7 +66,7 @@ func send(adapter, from_seat: int, args: Dictionary, day: int, to_is_human: bool
 	var terms: Dictionary = args.get("terms", {}) if args.get("terms") is Dictionary else {}
 	if kind == "trade":
 		var amt := deal_amount(terms)
-		if amt < 0.0 or not adapter.can_afford(from_seat, amt):
+		if amt < 0.0 or (adapter.has_method("can_afford") and not adapter.can_afford(from_seat, amt)):
 			return {"ok": false, "code": Proto.ERR_ILLEGAL, "text": "mail_bad_amount"}
 		terms = terms.duplicate()
 		terms["amount"] = amt

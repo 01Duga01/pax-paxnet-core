@@ -22,6 +22,8 @@ var profile := [                 # скорость → {days за шаг, мс 
 	{"days": 5, "ms": 250},
 	{"days": 15, "ms": 250},
 ]
+const MAX_VOTES := 8
+
 var _votes := {}                 # id → {kind, value, ids:{}, until}
 
 
@@ -55,6 +57,13 @@ func _votes_view() -> Array:
 func command(player_id: int, player_name: String, is_host: bool, kind: String, value, voters: Array, now_ms: int) -> Dictionary:
 	if kind != "pause" and kind != "resume" and kind != "speed":
 		return {"ok": false, "code": Proto.ERR_ILLEGAL, "changed": false}
+	# значение приходит от игрока: у скорости это число от 1 до максимума, у остальных команд значения нет
+	if kind == "speed":
+		if not (value is int or value is float) or is_nan(float(value)) or is_inf(float(value)):
+			return {"ok": false, "code": Proto.ERR_ILLEGAL, "changed": false}
+		value = clampi(int(value), 1, profile.size() - 1)
+	else:
+		value = null
 	if is_host:
 		return _apply(player_id, player_name, kind, value)
 	if mode == "host":
@@ -63,6 +72,8 @@ func command(player_id: int, player_name: String, is_host: bool, kind: String, v
 	if kind == "pause":
 		return _apply(player_id, player_name, kind, value)
 	var key := "%s:%s" % [kind, str(value)]
+	if not _votes.has(key) and _votes.size() >= MAX_VOTES:
+		return {"ok": false, "code": Proto.ERR_RATE, "changed": false}
 	var need := int(floor(float(voters.size()) / 2.0)) + 1
 	var cur: Dictionary = _votes.get(key, {"kind": kind, "value": value, "ids": {}, "until": now_ms + vote_window_ms, "need": need})
 	cur["need"] = need

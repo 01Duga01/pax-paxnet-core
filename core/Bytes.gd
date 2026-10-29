@@ -159,6 +159,7 @@ class R extends RefCounted:
 	var buf: PackedByteArray
 	var pos := 0
 	var ok := true
+	var nodes_left := -1            # бюджет разбора значений; -1 - без предела
 
 	func _init(b: PackedByteArray = PackedByteArray(), start: int = 0) -> void:
 		buf = b
@@ -290,6 +291,11 @@ class R extends RefCounted:
 		if depth > MAX_DEPTH:
 			ok = false
 			return null
+		if nodes_left >= 0:
+			nodes_left -= 1
+			if nodes_left < 0:
+				ok = false
+				return null
 		var t := u8()
 		if not ok:
 			return null
@@ -350,7 +356,10 @@ static func encode(v) -> PackedByteArray:
 
 
 # Возвращает {"ok": bool, "v": значение}. Мусор от сети не должен ронять приём.
-static func decode(b: PackedByteArray) -> Dictionary:
+# max_nodes - сколько значений (элементов, ключей) разрешено разобрать; -1 без предела. Для сообщений от гостей
+# предел обязателен: стоимость разбора считается по элементам, а не по байтам.
+static func decode(b: PackedByteArray, max_nodes: int = -1) -> Dictionary:
 	var r := R.new(b)
+	r.nodes_left = max_nodes
 	var v = r.variant()
 	return {"ok": r.ok and r.left() == 0, "v": v}

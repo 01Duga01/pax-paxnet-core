@@ -23,11 +23,19 @@ const NODE_NAME: String = "PaxNetWorld"
 const RELOAD_GAP_MS: int = 30000
 const MSG_CHAT: String = "paxnet.chat"
 const MSG_DEAL: String = "paxnet.deal"
+## Торговля в два шага: хост просит отдающего списать сумму (MSG_DEBIT), тот отвечает (MSG_PAID), и только потом
+## получатель получает деньги. Так деньги не появляются из воздуха, пока отдающий честен.
+const MSG_DEBIT: String = "paxnet.deal_debit"
+const MSG_PAID: String = "paxnet.deal_paid"
+const MAX_PENDING_DEBITS: int = 64
 
 ## PaxMod библиотеки: настройки (ключ игрока) и перевод.
 var mod: Object = null
 ## Из сейва хоста: те же игроки и страны, тот же код комнаты.
 var resume_state: Dictionary = {}
+## Хост: ждём подтверждения списания. id → {pid, to, from, amt}.
+var _debits: Dictionary = {}
+var _debit_seq: int = 0
 var settings: Dictionary = {"time_mode": "host", "join_in_progress": true, "allow_coruler": true, "max_players": 5}
 var progress_what: String = ""
 var progress_ratio: float = 1.0
@@ -200,6 +208,12 @@ func _on_message(from_id: int, type: String, data: Variant) -> void:
 		var d: Dictionary = data
 		_deal_here(str(d.get("kind", "")), str(d.get("other", "")), d.get("terms", {}) if d.get("terms") is Dictionary else {}, bool(d.get("giver", false)))
 		return
+	if type == MSG_DEBIT and role == "guest" and from_id == HOST_ID and data is Dictionary:
+		_on_debit_request(data)
+		return
+	if type == MSG_PAID and role == "host" and data is Dictionary:
+		_on_debit_paid(from_id, data)
+		return
 	app_message.emit(from_id, type, data)
 
 
@@ -243,8 +257,11 @@ func apply_deal(kind: String, from_country: String, to_country: String, terms: D
 	if g == null:
 		return {"ok": false}
 	var me: String = str(g.call("country"))
-	if kind == "trade" and (Mailbox.deal_amount(terms) < 0.0 or not can_afford(from_country, Mailbox.deal_amount(terms))):
-		return {"ok": false, "code": "illegal"}
+	if kind == "trade":
+		var amt: float = Mailbox.deal_amount(terms)
+		if amt < 0.0:
+			return {"ok": false, "code": "illegal"}
+		return _trade(g, me, from_country, to_country, amt) if amt > 0.0 else {"ok": true}
 	for side in [[from_country, to_country], [to_country, from_country]]:
 		var who: String = str(side[0])
 		var other: String = str(side[1])
@@ -256,6 +273,65 @@ func apply_deal(kind: String, from_country: String, to_country: String, terms: D
 			if pid != "" and int(pid) != HOST_ID:
 				send(int(pid), MSG_DEAL, {"kind": kind, "other": other, "terms": terms, "giver": who == from_country})
 	return {"ok": true}
+
+
+# Торговля: сначала списывает отдающий, потом получает получатель.
+func _trade(g: Object, me: String, from_country: String, to_country: String, amt: float) -> Dictionary:
+	if from_country == me:
+		if not _treasury_ok(g, amt):
+			return {"ok": false, "code": "illegal"}
+		g.call("add_money", -amt)
+		_credit(g, me, to_country, from_country, amt)
+		return {"ok": true}
+	if role != "host":
+		return {"ok": false}
+	var pid: String = player_of_seat(int(adapter.call("seat_of_country", from_country)))
+	if pid == "" or int(pid) == HOST_ID:
+		return {"ok": false, "code": "illegal"}
+	if _debits.size() >= MAX_PENDING_DEBITS:
+		_debits.erase(_debits.keys()[0])
+	_debit_seq += 1
+	_debits[_debit_seq] = {"pid": int(pid), "to": to_country, "from": from_country, "amt": amt}
+	send(int(pid), MSG_DEBIT, {"id": _debit_seq, "amount": amt})
+	return {"ok": true}
+
+
+# Получатель получает деньги: хост сразу, гость - сообщением.
+func _credit(g: Object, me: String, to_country: String, from_country: String, amt: float) -> void:
+	if to_country == me:
+		g.call("add_money", amt)
+	elif role == "host":
+		var pid: String = player_of_seat(int(adapter.call("seat_of_country", to_country)))
+		if pid != "" and int(pid) != HOST_ID:
+			send(int(pid), MSG_DEAL, {"kind": "trade", "other": from_country, "terms": {"amount": amt}, "giver": false})
+
+
+# Гость: хост просит списать сумму сделки.
+func _on_debit_request(d: Dictionary) -> void:
+	var g: Object = _game()
+	if g == null:
+		return
+	var amt: float = Mailbox.deal_amount({"amount": d.get("amount", -1.0)})
+	var ok: bool = amt > 0.0 and _treasury_ok(g, amt)
+	if ok:
+		g.call("add_money", -amt)
+	send(HOST_ID, MSG_PAID, {"id": int(d.get("id", -1)), "ok": ok})
+
+
+# Хост: отдающий подтвердил списание (подтверждение принимается один раз и только от него).
+func _on_debit_paid(from_id: int, d: Dictionary) -> void:
+	var id: int = int(d.get("id", -1))
+	var p: Dictionary = _debits.get(id, {})
+	if p.is_empty() or int(p["pid"]) != from_id:
+		return
+	_debits.erase(id)
+	var g: Object = _game()
+	if g != null and bool(d.get("ok", false)):
+		_credit(g, str(g.call("country")), str(p["to"]), str(p["from"]), float(p["amt"]))
+
+
+func _treasury_ok(g: Object, amount: float) -> bool:
+	return amount >= 0.0 and (not g.has_method("money") or float(g.call("money")) >= amount)
 
 
 # Хватает ли казны у страны. Чужую казну хост не видит: проверяет только свою страну, остальное - отдающий у себя.
@@ -279,9 +355,7 @@ func _deal_here(kind: String, other: String, terms: Dictionary, giver: bool) -> 
 		"peace", "alliance":
 			g.call("change_relation", other, 0.3 if kind == "alliance" else 0.15)
 		"trade":
+			# сюда приходит только зачисление получателю; списание идёт отдельным шагом (MSG_DEBIT)
 			var amt: float = Mailbox.deal_amount(terms)
-			if amt <= 0.0:
-				return
-			if giver and not can_afford(str(g.call("country")), amt):
-				return
-			g.call("add_money", -amt if giver else amt)
+			if amt > 0.0 and not giver:
+				g.call("add_money", amt)

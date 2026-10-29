@@ -57,6 +57,7 @@ const ERR_RATE := "rate"                 # слишком часто
 const ERR_BAD_PACKET := "bad_packet"
 const ERR_DESYNC := "desync"             # мир расходился, лечение не помогло
 const ERR_NO_ROUTE := "no_route"         # не достучаться (NAT, порт, ретранслятор)
+const ERR_PIN := "pin"                   # ключ хоста не совпал с приглашением (подмена на ретрансляторе или чужое приглашение)
 const ERR_RELAY := "relay"               # ретранслятор недоступен
 
 # Что сказать игроку и что нажать — ключи перевода мода (data/lang/*.json):
