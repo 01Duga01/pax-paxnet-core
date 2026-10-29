@@ -34,6 +34,15 @@ var cfg := {
 	# фиксирует прожитое: record_step(days). Иначе шаги идут по таймеру скорости.
 	"external_time": false,
 	"push_min_ms": 0,              # не чаще (мс) рассылать изменения мира (склейка шагов)
+	# Пределы сообщений игры и модов (M_APP) от одного гостя; нарушение рвёт его звено.
+	"app_max_unpack": 4 << 20,     # байт после распаковки одного сообщения
+	"app_window": 1024,            # насколько номер может уйти вперёд от принятого
+	"app_msgs_per_s": 50.0,        # сообщений в секунду (ведро в 2 секунды)
+	"app_bytes_per_s": 524288.0,   # байт после распаковки в секунду
+	"app_burst_bytes": 6 << 20,    # ведро байт (не меньше app_max_unpack)
+	# Лечение разделов (M_RESYNC): не чаще раза в resync_gap_ms и не больше resync_burst подряд, ведро пополняется
+	# раз в resync_refill_ms.
+	"resync_gap_ms": 250, "resync_burst": 6, "resync_refill_ms": 5000,
 }
 var phase := "lobby"             # lobby | playing
 var peers := {}                  # id → peer
@@ -168,7 +177,9 @@ func _attach(ctx: Dictionary, link, endpoint) -> void:
 		r["name"] = str(ctx["name"]).substr(0, 24)
 	var p := {"id": id, "key": key, "link": link, "endpoint": endpoint, "state": "play" if ctx["mode"] != "world" else "sync",
 		"rtt": 0.0, "reported": tick, "ready": false, "rate": 0.0, "rate_ms": 0, "frag": Frag.new(), "xfer": null,
-		"away_ms": 0, "ai_set": false, "last_resync_ms": -10000}
+		"away_ms": 0, "ai_set": false, "last_resync_ms": -10000,
+		"app_t": _now, "app_msgs": float(cfg["app_msgs_per_s"]) * 2.0, "app_bytes": float(maxi(int(cfg["app_burst_bytes"]), int(cfg["app_max_unpack"]))),
+		"resync_tokens": float(cfg["resync_burst"]), "resync_t": _now}
 	if peers.has(id):
 		p["ready"] = bool(peers[id].get("ready", false))
 	peers[id] = p
@@ -179,7 +190,10 @@ func _attach(ctx: Dictionary, link, endpoint) -> void:
 	_send_lobby(p)
 	_send_time(p)
 	if not _apps.has(key):
-		_apps[key] = AppChannel.new()
+		var ch := AppChannel.new()
+		ch.max_unpack = int(cfg["app_max_unpack"])
+		ch.max_window = int(cfg["app_window"])
+		_apps[key] = ch
 	else:
 		_apps[key].resend(link)      # что не дошло до обрыва — снова, повторы гость отсеет
 	if phase == "playing":
@@ -250,7 +264,16 @@ func _on_message(p: Dictionary, type: int, body: PackedByteArray) -> void:
 			if r4.ok:
 				p["rtt"] = float(_now - sent)
 		Proto.M_APP:
-			for m in _apps[p["key"]].on_msg(body):
+			if not _app_budget(p, body):
+				_drop_peer(p, "app_rate")
+				return
+			var ch2 = _apps[p["key"]]
+			var ready: Array = ch2.on_msg(body)
+			if ch2.violated:
+				ch2.violated = false
+				_drop_peer(p, "app_abuse")
+				return
+			for m in ready:
 				_route_app(p["id"], m)
 		Proto.M_APP_ACK:
 			_apps[p["key"]].on_ack(body)
@@ -334,6 +357,21 @@ func _queue_action(player_id: int, c: int, kind: String, args, size: int) -> Dic
 		return {"ok": false, "code": Proto.ERR_RATE}
 	_pending_actions.append({"p": player_id, "s": int(r["seat"]), "r": str(r["role"]), "c": c, "k": kind, "g": args})
 	return {"ok": true, "code": ""}
+
+
+# Ведра на гостя: сообщений и байт (по заявленному размеру после распаковки). false — лимит пробит.
+func _app_budget(p: Dictionary, body: PackedByteArray) -> bool:
+	var size: int = AppChannel.claimed_size(body)
+	if size < 0:
+		return false
+	var dt := float(_now - int(p["app_t"])) / 1000.0
+	p["app_t"] = _now
+	var msgs: float = float(cfg["app_msgs_per_s"])
+	var per_s: float = float(cfg["app_bytes_per_s"])
+	var cap_b: float = float(maxi(int(cfg["app_burst_bytes"]), int(cfg["app_max_unpack"])))
+	p["app_msgs"] = minf(float(p["app_msgs"]) + dt * msgs, msgs * 2.0) - 1.0
+	p["app_bytes"] = minf(float(p["app_bytes"]) + dt * per_s, cap_b) - float(size)
+	return float(p["app_msgs"]) >= 0.0 and float(p["app_bytes"]) >= 0.0
 
 
 func _rate_ok(id: int) -> bool:
@@ -441,7 +479,7 @@ func _choose_seat(id: int, key: String, seat: int, role: String) -> Dictionary:
 	if id == HOST_ID:
 		host_seat = seat
 	if phase == "playing":
-		_pending_events.append({"k": "seat", "seat": seat, "id": id, "key": key, "name": r["name"], "role": role, "ai": false})
+		_pending_events.append({"k": "seat", "seat": seat, "id": id, "key": seat_tag(key), "name": r["name"], "role": role, "ai": false})
 	return {"ok": true}
 
 
@@ -591,7 +629,7 @@ func start_game() -> Dictionary:
 		var r: Dictionary = roster[k]
 		if int(r["seat"]) >= 0 and str(r["role"]) == "player":
 			var away: bool = peers.has(int(r["id"])) and peers[int(r["id"])]["state"] == "away" or (not peers.has(int(r["id"])) and int(r["id"]) != HOST_ID)
-			var ev := {"k": "seat", "seat": int(r["seat"]), "id": int(r["id"]), "key": k, "name": r["name"], "role": "player", "ai": away}
+			var ev := {"k": "seat", "seat": int(r["seat"]), "id": int(r["id"]), "key": seat_tag(k), "name": r["name"], "role": "player", "ai": away}
 			_apply_event(ev)
 	time.paused = false
 	time.version += 1
@@ -814,9 +852,16 @@ func _on_resync(p: Dictionary, body: PackedByteArray) -> void:
 	var d := Bytes.decode(body)
 	if not d["ok"] or not (d["v"] is Dictionary) or p["state"] != "play":
 		return
-	if _now - int(p["last_resync_ms"]) < 250:
+	if _now - int(p["last_resync_ms"]) < int(cfg["resync_gap_ms"]):
 		return
 	p["last_resync_ms"] = _now
+	var refill := float(_now - int(p["resync_t"])) / float(maxi(int(cfg["resync_refill_ms"]), 1))
+	p["resync_t"] = _now
+	p["resync_tokens"] = minf(float(p["resync_tokens"]) + refill, float(cfg["resync_burst"]))
+	if float(p["resync_tokens"]) < 1.0:
+		stats["rejected"] += 1
+		return
+	p["resync_tokens"] = float(p["resync_tokens"]) - 1.0
 	var names: Array = []
 	var known: Array = adapter.section_names() + ["mail", "seats"]
 	for n in d["v"].get("names", []):

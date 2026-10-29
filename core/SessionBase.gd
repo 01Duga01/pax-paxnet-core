@@ -21,6 +21,7 @@ const Proto = preload("res://mods/paxnet/core/Proto.gd")
 const Mailbox = preload("res://mods/paxnet/core/Mailbox.gd")
 const TimeAuthority = preload("res://mods/paxnet/core/TimeAuthority.gd")
 const SharedRng = preload("res://mods/paxnet/core/SharedRng.gd")
+const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
 
 var adapter
 var tick := 0                    # последний применённый шаг
@@ -68,6 +69,11 @@ func apply_own_sections(data: Dictionary) -> void:
 		seats = {}
 		for k in data["seats"]:
 			seats[int(k)] = data["seats"][k]
+
+
+# Открытая метка игрока для мира (события мест и раздел seats уходят ВСЕМ гостям): по ней ключ комнаты не восстановить.
+static func seat_tag(key: String) -> String:
+	return Hmac.mac("pax-seat".to_utf8_buffer(), key.to_utf8_buffer()).hex_encode().substr(0, 16)
 
 
 func seat_is_human(seat: int) -> bool:

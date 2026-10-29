@@ -12,10 +12,12 @@ const Xfer = preload("res://mods/paxnet/core/Xfer.gd")
 const Frag = preload("res://mods/paxnet/core/Frag.gd")
 const Delta = preload("res://mods/paxnet/core/Delta.gd")
 const AppChannel = preload("res://mods/paxnet/core/AppChannel.gd")
+const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
 
 var state := "idle"              # idle | connecting | lobby | syncing | playing | reconnecting | failed | closed
 var key := ""
 var name := "?"
+var room_code := ""              # код комнаты: из него и ключа игрока выводится ключ для этой комнаты
 var extra_info := {}             # mods, code, game_ver…
 var send_fn: Callable            # (bytes) — датаграмма хосту (UDP или через ретранслятор)
 var on_event: Callable           # (kind, data)
@@ -63,8 +65,14 @@ func _emit(kind: String, data: Dictionary = {}) -> void:
 		on_event.call(kind, data)
 
 
+# Хосту уходит не сам ключ игрока, а ключ ЭТОЙ комнаты: HMAC(ключ игрока, код комнаты). Хост узнаёт по нему
+# вернувшегося игрока у себя, но в чужой комнате этот ключ ничего не открывает.
+func room_key() -> String:
+	return Hmac.mac(key.to_utf8_buffer(), ("pax-room|" + room_code).to_utf8_buffer()).hex_encode().substr(0, 32)
+
+
 func _info() -> Dictionary:
-	var i := {"proto": Proto.VERSION, "key": key, "name": name, "has_world": _has_world and state != "syncing",
+	var i := {"proto": Proto.VERSION, "key": room_key(), "name": name, "has_world": _has_world and state != "syncing",
 		"last_tick": tick if _has_world else -1, "core": _core}
 	i.merge(extra_info)
 	return i

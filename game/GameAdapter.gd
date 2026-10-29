@@ -231,6 +231,10 @@ func apply_deal(kind: String, from_seat: int, to_seat: int, terms: Dictionary) -
 	return {"ok": false}
 
 
+func can_afford(seat: int, amount: float) -> bool:
+	return service == null or service.can_afford(country_of_seat(seat), amount)
+
+
 func on_news(e: Dictionary) -> void:
 	if service != null:
 		service.show_news(e)

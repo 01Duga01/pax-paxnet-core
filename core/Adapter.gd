@@ -104,6 +104,11 @@ func apply_deal(_kind: String, _from_seat: int, _to_seat: int, _terms: Dictionar
 	return {"ok": true}
 
 
+# Хватит ли у страны казны на сумму сделки (проверка при отправке письма). Не знает казны - true.
+func can_afford(_seat: int, _amount: float) -> bool:
+	return true
+
+
 # Страна ведёт ИИ и ей пришло предложение: детерминированный ответ.
 func auto_reply(_kind: String, _from_seat: int, _to_seat: int, _terms: Dictionary) -> bool:
 	return false

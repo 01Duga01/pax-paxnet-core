@@ -13,12 +13,17 @@ const Proto = preload("res://mods/paxnet/core/Proto.gd")
 const Frag = preload("res://mods/paxnet/core/Frag.gd")
 
 const COMPRESS_FROM := 4096
+const MAX_UNPACK := 4 << 20      # предел размера после распаковки (хост берёт свой из cfg)
+const MAX_WINDOW := 1024         # насколько вперёд от in_seq принимаем номера не по порядку
 
 var next_seq := 1
 var out := {}                    # seq → тело (готовое к отправке)
 var in_seq := 0                  # всё до этого номера уже отдано игре
 var _hold := {}                  # пришедшие раньше времени
 var _acked_sent := -1
+var max_unpack := MAX_UNPACK
+var max_window := MAX_WINDOW
+var violated := false            # собеседник нарушил предел: звено пора рвать
 
 
 func send(link, payload: Dictionary) -> int:
@@ -59,6 +64,17 @@ func on_ack(body: PackedByteArray) -> void:
 			out.erase(s)
 
 
+# Заявленный размер сообщения после распаковки (дёшево, без распаковки). -1 — заголовок битый.
+static func claimed_size(body: PackedByteArray) -> int:
+	if body.is_empty():
+		return 0
+	if body[0] != 1:
+		return body.size() - 1
+	var r := Bytes.R.new(body, 1)
+	var size := r.varint()
+	return size if r.ok else -1
+
+
 # Пришло сообщение. Возвращает список готовых по порядку (повторы отброшены).
 func on_msg(body: PackedByteArray) -> Array:
 	if body.is_empty():
@@ -67,10 +83,16 @@ func on_msg(body: PackedByteArray) -> Array:
 	if body[0] == 1:
 		var r := Bytes.R.new(body, 1)
 		var size := r.varint()
-		if not r.ok or size > 64 << 20:
+		if not r.ok or size > max_unpack:
+			violated = true
 			return []
 		raw = body.slice(r.pos).decompress(size, Bytes.ZSTD)
+		if raw.size() != size:
+			return []
 	else:
+		if body.size() - 1 > max_unpack:
+			violated = true
+			return []
 		raw = body.slice(1)
 	var d := Bytes.decode(raw)
 	if not d["ok"] or not (d["v"] is Dictionary):
@@ -78,6 +100,9 @@ func on_msg(body: PackedByteArray) -> Array:
 	var m: Dictionary = d["v"]
 	var s := int(m.get("s", 0))
 	if s <= in_seq or _hold.has(s):
+		return []
+	if s - in_seq > max_window:
+		violated = true
 		return []
 	_hold[s] = m
 	var ready: Array = []
