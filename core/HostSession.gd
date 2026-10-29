@@ -50,6 +50,7 @@ var cfg := {
 	"peer_msgs_per_s": 300.0, "peer_msgs_burst": 600,
 	# Размеры сообщений гостя до разбора (байт): разбор дорогой, длину проверяем раньше.
 	"max_lobby_cmd_bytes": 1024, "max_chat_bytes": 2048, "max_time_cmd_bytes": 256, "max_resync_bytes": 8192,
+	"roster_idle_ms": 600000,       # запись игрока без места и без связи забывается через столько мс (освобождает список)
 	"max_frag_bytes": 8 << 20, "max_roster": 0,    # max_roster = 0: max_players * 4, не меньше 16
 }
 var phase := "lobby"             # lobby | playing
@@ -63,6 +64,7 @@ var _apps := {}                  # ключ игрока → AppChannel (жив�
 var stats := {"steps": 0, "patches": 0, "worlds": 0, "replays": 0, "resyncs": 0, "dup_actions": 0, "rejected": 0, "desync_reports": 0}
 
 var _next_id := 2
+var _last_prune_ms := 0
 var _lag_since := {}            # id игрока → когда начал держать шаги
 var _pending_actions: Array = []
 var _pending_events: Array = []
@@ -161,7 +163,8 @@ func _admit(_endpoint, info: Dictionary, now_ms: int) -> Dictionary:
 		if _humans_online() >= int(cfg["max_players"]):
 			return {"ok": false, "code": Proto.ERR_FULL}
 		var roster_cap: int = int(cfg["max_roster"]) if int(cfg["max_roster"]) > 0 else maxi(int(cfg["max_players"]) * 4, 16)
-		if roster.size() >= roster_cap:
+		# Список полон: забываем давно не виденных игроков без места, а если таких нет, самого старого из них.
+		if roster.size() >= roster_cap and not _prune_roster(now_ms, true):
 			return {"ok": false, "code": Proto.ERR_FULL}
 		if phase == "playing" and not bool(cfg["join_in_progress"]):
 			return {"ok": false, "code": Proto.ERR_STARTED}
@@ -174,7 +177,7 @@ func _admit(_endpoint, info: Dictionary, now_ms: int) -> Dictionary:
 	else:
 		id = _next_id
 		_next_id += 1
-		roster[key] = {"id": id, "name": str(info.get("name", "?")).substr(0, 24), "seat": -1, "role": "spectator", "cseq": 0}
+		roster[key] = {"id": id, "name": str(info.get("name", "?")).substr(0, 24), "seat": -1, "role": "spectator", "cseq": 0, "seen": now_ms}
 	var mode := "lobby"
 	if phase == "playing":
 		mode = "world"
@@ -1044,14 +1047,57 @@ func close_all(why: String = "host_left") -> void:
 
 # ------------------------------------------------------------------ главный цикл
 
+# Забыть записи игроков, у которых нет места и нет связи: давно не виденных (idle) или, при force, самую старую.
+# Игрок со страной, хост и заблокированные остаются. Возврат: удалена ли хотя бы одна запись.
+func _prune_roster(now_ms: int, force: bool) -> bool:
+	var idle_ms: int = int(cfg["roster_idle_ms"])
+	var oldest_key := ""
+	var oldest_seen := 1 << 62
+	var removed := false
+	for k in roster.keys():
+		var r: Dictionary = roster[k]
+		if int(r["id"]) == HOST_ID or int(r["seat"]) >= 0 or now_ms < int(r.get("banned_until", 0)):
+			continue
+		var p = peers.get(int(r["id"]))
+		if p != null and p.get("link") != null:
+			continue
+		var seen: int = int(r.get("seen", now_ms))
+		if not r.has("seen"):
+			r["seen"] = now_ms
+		if now_ms - seen >= idle_ms:
+			_forget_player(k)
+			removed = true
+		elif seen < oldest_seen:
+			oldest_seen = seen
+			oldest_key = k
+	if not removed and force and oldest_key != "":
+		_forget_player(oldest_key)
+		removed = true
+	return removed
+
+
+func _forget_player(key: String) -> void:
+	var id: int = int(roster[key]["id"])
+	roster.erase(key)
+	_apps.erase(key)
+	peers.erase(id)
+	_views.erase(id)
+	_lobby_v += 1
+
+
 func update(now_ms: int) -> void:
 	_now = now_ms
 	time.expire(now_ms)
+	if now_ms - _last_prune_ms >= 30000:
+		_last_prune_ms = now_ms
+		_prune_roster(now_ms, false)
 	var ids := peers.keys()
 	for id in ids:
 		var p: Dictionary = peers[id]
 		var link = p.get("link")
 		if link != null:
+			if roster.has(p["key"]):
+				roster[p["key"]]["seen"] = now_ms
 			link.poll(now_ms)
 			if link.dead:
 				_drop_peer(p, "timeout")
