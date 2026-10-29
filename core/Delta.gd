@@ -6,7 +6,7 @@ extends RefCounted
 # уровня (глубже — целиком), остальное — целиком. base — сумма раздела, к которому разница применима:
 # не совпала у гостя — он просит раздел целиком.
 
-const StateHash = preload("res://mods/paxnet/core/StateHash.gd")
+const StateHash = preload("res://mods/paxnet_core/core/StateHash.gd")
 
 
 static func diff(old, new) -> Dictionary:

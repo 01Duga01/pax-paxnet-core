@@ -6,7 +6,7 @@ extends RefCounted
 # приказы, поэтому исполняется ровно один раз и у всех в одном порядке; состояние входит в
 # сверку (раздел "mail"). Согласие нужно от адресата; война — одностороннее действие.
 
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 const KINDS := ["war", "peace", "alliance", "trade", "coruler", "letter"]
 const NEEDS_REPLY := ["peace", "alliance", "trade", "coruler"]
@@ -41,6 +41,20 @@ func _open_from(seat: int) -> int:
 	return n
 
 
+# Сумма торговой сделки: число не меньше нуля и не больше предела. -1 — недопустимо.
+const MAX_AMOUNT := 1.0e12
+
+
+static func deal_amount(terms: Dictionary) -> float:
+	var v = terms.get("amount", 0.0)
+	if not (v is int or v is float):
+		return -1.0
+	var a: float = float(v)
+	if is_nan(a) or is_inf(a) or a < 0.0 or a > MAX_AMOUNT:
+		return -1.0
+	return a
+
+
 # mail.send: {to, kind, terms}
 func send(adapter, from_seat: int, args: Dictionary, day: int, to_is_human: bool) -> Dictionary:
 	var kind := str(args.get("kind", ""))
@@ -50,6 +64,12 @@ func send(adapter, from_seat: int, args: Dictionary, day: int, to_is_human: bool
 	if _open_from(from_seat) >= MAX_OPEN:
 		return {"ok": false, "code": Proto.ERR_RATE, "text": "mail_many"}
 	var terms: Dictionary = args.get("terms", {}) if args.get("terms") is Dictionary else {}
+	if kind == "trade":
+		var amt := deal_amount(terms)
+		if amt < 0.0 or not adapter.can_afford(from_seat, amt):
+			return {"ok": false, "code": Proto.ERR_ILLEGAL, "text": "mail_bad_amount"}
+		terms = terms.duplicate()
+		terms["amount"] = amt
 	var id := next_id
 	next_id += 1
 	var it := {"id": id, "from": from_seat, "to": to_seat, "kind": kind, "terms": terms, "day": day, "status": "open"}

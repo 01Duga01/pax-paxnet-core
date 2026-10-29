@@ -14,24 +14,27 @@ extends RefCounted
 #   oneshot    — одноразовое без повторов (куски больших передач: повтором занимается Xfer).
 #
 # Заголовок пакета: magic u8 | flags u8 (бит 0 — поле ack действительно) | conn u32 | seq u16 | ack u16 | ack_bits u32 (бит i — получен
-# пакет ack-1-i) | записи | подпись HMAC-SHA256 (8 байт). Подпись защищает от подделки пакетов
-# теми, кто не видит трафик; шифрования нет.
+# пакет ack-1-i) | IV (16) | записи, зашифрованные AES-128-CBC (с дополнением до 16) | подпись HMAC-SHA256
+# (8 байт) по всему пакету. Ключи шифра и подписи выводятся из ключа звена (см. Cipher.gd); заголовок открыт.
 #
 # Время передаётся снаружи (now_ms), сокетов здесь нет: ядро одинаково работает на настоящем
 # UDP, в симуляторе сети тестов и (в виде StreamLink) поверх WebSocket.
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
+const Cipher = preload("res://mods/paxnet_core/core/Cipher.gd")
 
 const MAGIC := 0xA7
 const HEADER := 14
 const TAG := 8
+const ENC_OVERHEAD := 32         # IV (16) + дополнение шифра (до 16)
 const REC_RELIABLE := 1
 const REC_SLOT := 2
 const REC_ONESHOT := 3
 
 var conn_id := 0
 var key := PackedByteArray()
+var enc_key := PackedByteArray()
 var mtu := 1200
 var send_fn: Callable            # (PackedByteArray) -> void
 var on_message: Callable         # (type: int, body: PackedByteArray) -> void
@@ -76,10 +79,11 @@ var max_packets_per_poll := 6
 func _init(conn: int = 0, key_: PackedByteArray = PackedByteArray()) -> void:
 	conn_id = conn
 	key = key_
+	enc_key = Cipher.derive_aes(key_, "pax-pkt-enc")
 
 
 func budget() -> int:
-	return mtu - HEADER - TAG
+	return mtu - HEADER - TAG - ENC_OVERHEAD
 
 
 # Самое большое сообщение, которое влезает в пакет.
@@ -157,14 +161,21 @@ func rto_ms() -> float:
 # --------------------------------------------------------------- приём
 
 func receive(data: PackedByteArray, now_ms: int) -> void:
-	if data.size() < HEADER + TAG or data[0] != MAGIC:
+	if data.size() < HEADER + 2 * Cipher.BLOCK + TAG or data[0] != MAGIC:
 		stats["bad_packets"] += 1
 		return
-	var body_end := data.size() - TAG
-	if not Hmac.equal(Hmac.tag(key, data.slice(0, body_end), TAG), data.slice(body_end)):
+	var sealed_end := data.size() - TAG
+	if not Hmac.equal(Hmac.tag(key, data.slice(0, sealed_end), TAG), data.slice(sealed_end)):
 		stats["bad_packets"] += 1
 		return
-	var r := Bytes.R.new(data, 1)
+	var inner = Cipher.open(enc_key, data.slice(HEADER, sealed_end))
+	if inner == null:
+		stats["bad_packets"] += 1
+		return
+	var plain: PackedByteArray = data.slice(0, HEADER)
+	plain.append_array(inner)
+	var body_end := plain.size()
+	var r := Bytes.R.new(plain, 1)
 	if r.u32() != conn_id:
 		stats["bad_packets"] += 1
 		return
@@ -362,7 +373,7 @@ func _send_packet(now_ms: int) -> void:
 	w.u16(seq)
 	var ack := _recv_hi if _recv_hi >= 0 else 0
 	w.u16(ack).u32(_recv_bits)
-	var room := mtu - TAG
+	var room := mtu - TAG - ENC_OVERHEAD
 	var ids: Array = []
 	# 1. надёжные, которым пора: новые и потерянные — по порядку id
 	var used := {}
@@ -416,7 +427,9 @@ func _send_packet(now_ms: int) -> void:
 			break
 		_oneshots.pop_front()
 		w.u8(REC_ONESHOT).u8(o[0]).bytes(ob)
-	var packet := w.buf
+	var head: PackedByteArray = w.buf.slice(0, HEADER)
+	var packet: PackedByteArray = head
+	packet.append_array(Cipher.seal(enc_key, w.buf.slice(HEADER)))
 	packet.append_array(Hmac.tag(key, packet, TAG))
 	_sent[seq] = {"t": now_ms, "ids": ids}
 	_ack_due = -1

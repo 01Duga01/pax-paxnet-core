@@ -1,4 +1,4 @@
-extends "res://mods/paxnet/net/Session.gd"
+extends "res://mods/paxnet_core/net/Session.gd"
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
@@ -11,7 +11,8 @@ extends "res://mods/paxnet/net/Session.gd"
 # В библиотеке узел сети игры остаётся игровым: связь идёт его же каналом relay_pipe(), а партию
 # открывает мод, которому она нужна: PaxNetLib.world_service().host_open(...) / guest_join(...).
 
-const GameAdapter = preload("res://mods/paxnet/game/GameAdapter.gd")
+const GameAdapter = preload("res://mods/paxnet_core/game/GameAdapter.gd")
+const Mailbox = preload("res://mods/paxnet_core/core/Mailbox.gd")
 
 signal lobby_changed
 signal connection_lost(why: String)
@@ -38,7 +39,7 @@ var _reload_pending: bool = false
 static func get_or_create(tree: SceneTree) -> Node:
 	var n: Node = tree.root.get_node_or_null(NODE_NAME)
 	if n == null:
-		var s: Variant = load("res://mods/paxnet/game/NetService.gd")
+		var s: Variant = load("res://mods/paxnet_core/game/NetService.gd")
 		n = (s as Script).new() as Node
 		n.name = NODE_NAME
 		tree.root.add_child.call_deferred(n)
@@ -86,7 +87,7 @@ func host_open(display_name_: String, rules: Dictionary = {}) -> String:
 		"join_in_progress": bool(rules.get("join_in_progress", settings["join_in_progress"])),
 		"allow_coruler": bool(rules.get("allow_coruler", settings["allow_coruler"])),
 		"max_players": int(rules.get("max_players", settings["max_players"])), "mods": str(rules.get("mods", "")),
-		"preset": "paxnet_world", "want_code": str(resume_state.get("code", ""))}
+		"preset": "paxnet_world", "want_code": str(resume_state.get("code", "")), "want_pin": str(resume_state.get("pin", ""))}
 	var ad: Object = GameAdapter.new()
 	ad.set("service", self)
 	var err: String = host(display_name_, ad, cfg)
@@ -242,6 +243,8 @@ func apply_deal(kind: String, from_country: String, to_country: String, terms: D
 	if g == null:
 		return {"ok": false}
 	var me: String = str(g.call("country"))
+	if kind == "trade" and (Mailbox.deal_amount(terms) < 0.0 or not can_afford(from_country, Mailbox.deal_amount(terms))):
+		return {"ok": false, "code": "illegal"}
 	for side in [[from_country, to_country], [to_country, from_country]]:
 		var who: String = str(side[0])
 		var other: String = str(side[1])
@@ -255,6 +258,16 @@ func apply_deal(kind: String, from_country: String, to_country: String, terms: D
 	return {"ok": true}
 
 
+# Хватает ли казны у страны. Чужую казну хост не видит: проверяет только свою страну, остальное - отдающий у себя.
+func can_afford(country_name: String, amount: float) -> bool:
+	var g: Object = _game()
+	if g == null or amount < 0.0:
+		return false
+	if country_name != str(g.call("country")) or not g.has_method("money"):
+		return true
+	return float(g.call("money")) >= amount
+
+
 func _deal_here(kind: String, other: String, terms: Dictionary, giver: bool) -> void:
 	var g: Object = _game()
 	if g == null or other == "":
@@ -266,5 +279,9 @@ func _deal_here(kind: String, other: String, terms: Dictionary, giver: bool) -> 
 		"peace", "alliance":
 			g.call("change_relation", other, 0.3 if kind == "alliance" else 0.15)
 		"trade":
-			var amt: float = float(terms.get("amount", 0.0))
+			var amt: float = Mailbox.deal_amount(terms)
+			if amt <= 0.0:
+				return
+			if giver and not can_afford(str(g.call("country")), amt):
+				return
 			g.call("add_money", -amt if giver else amt)

@@ -5,7 +5,7 @@ extends RefCounted
 # ВРЕМЯ ПАРТИИ: пауза и скорость. Решает хост или голосование (настройка лобби); видно, кто
 # поставил паузу. Состояние одно — у хоста; гости получают его сообщением M_TIME.
 
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 var mode := "host"               # "host" | "vote"
 var paused := true

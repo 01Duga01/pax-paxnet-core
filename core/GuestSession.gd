@@ -1,4 +1,4 @@
-extends "res://mods/paxnet/core/SessionBase.gd"
+extends "res://mods/paxnet_core/core/SessionBase.gd"
 # This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
 # If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/.
 #
@@ -7,15 +7,18 @@ extends "res://mods/paxnet/core/SessionBase.gd"
 # выдерживает в ритме хоста (буфер против рывков сети), поэтому дата у гостя идёт ровно.
 # Связь пропала — сам переподключается в ту же партию за ту же страну.
 
-const Handshake = preload("res://mods/paxnet/core/Handshake.gd")
-const Xfer = preload("res://mods/paxnet/core/Xfer.gd")
-const Frag = preload("res://mods/paxnet/core/Frag.gd")
-const Delta = preload("res://mods/paxnet/core/Delta.gd")
-const AppChannel = preload("res://mods/paxnet/core/AppChannel.gd")
+const Handshake = preload("res://mods/paxnet_core/core/Handshake.gd")
+const Xfer = preload("res://mods/paxnet_core/core/Xfer.gd")
+const Frag = preload("res://mods/paxnet_core/core/Frag.gd")
+const Delta = preload("res://mods/paxnet_core/core/Delta.gd")
+const AppChannel = preload("res://mods/paxnet_core/core/AppChannel.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
 var state := "idle"              # idle | connecting | lobby | syncing | playing | reconnecting | failed | closed
 var key := ""
 var name := "?"
+var pin := ""                    # PIN приглашения: защита от подмены ключа на ретрансляторе
+var room_code := ""              # код комнаты: из него и ключа игрока выводится ключ для этой комнаты
 var extra_info := {}             # mods, code, game_ver…
 var send_fn: Callable            # (bytes) — датаграмма хосту (UDP или через ретранслятор)
 var on_event: Callable           # (kind, data)
@@ -63,8 +66,14 @@ func _emit(kind: String, data: Dictionary = {}) -> void:
 		on_event.call(kind, data)
 
 
+# Хосту уходит не сам ключ игрока, а ключ ЭТОЙ комнаты: HMAC(ключ игрока, код комнаты). Хост узнаёт по нему
+# вернувшегося игрока у себя, но в чужой комнате этот ключ ничего не открывает.
+func room_key() -> String:
+	return Hmac.mac(key.to_utf8_buffer(), ("pax-room|" + room_code).to_utf8_buffer()).hex_encode().substr(0, 32)
+
+
 func _info() -> Dictionary:
-	var i := {"proto": Proto.VERSION, "key": key, "name": name, "has_world": _has_world and state != "syncing",
+	var i := {"proto": Proto.VERSION, "key": room_key(), "name": name, "has_world": _has_world and state != "syncing",
 		"last_tick": tick if _has_world else -1, "core": _core}
 	i.merge(extra_info)
 	return i
@@ -80,6 +89,7 @@ func connect_udp(now_ms: int) -> void:
 	dialer.on_connected = func(l, w): _on_connected(l, w)
 	dialer.on_failed = func(code): _on_failed(code)
 	dialer.link_tune = link_tune
+	dialer.pin = pin
 	if state != "reconnecting":
 		state = "connecting"
 	dialer.start(now_ms, _info())

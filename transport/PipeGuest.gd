@@ -7,10 +7,10 @@ extends RefCounted
 # комнату заново: звено продолжается по подписи (без нового рукопожатия), а если оно успело
 # умереть - сессия сама переподключается в ту же страну с тем же ключом.
 
-const RelayPipe = preload("res://mods/paxnet/transport/RelayPipe.gd")
-const Relay = preload("res://mods/paxnet/transport/Relay.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const PipeHost = preload("res://mods/paxnet/transport/PipeHost.gd")
+const RelayPipe = preload("res://mods/paxnet_core/transport/RelayPipe.gd")
+const Relay = preload("res://mods/paxnet_core/transport/Relay.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const PipeHost = preload("res://mods/paxnet_core/transport/PipeHost.gd")
 
 ## Сколько ждать входа в комнату.
 const JOIN_WAIT_MS: int = 10000
@@ -46,6 +46,8 @@ func open(owner: Node, target: String, now_ms: int) -> String:
 	code = Relay.parse_code(target)
 	if code == "":
 		return Proto.ERR_CODE
+	session.set("room_code", code)
+	session.set("pin", Relay.parse_pin(target))
 	session.set("send_fn", Callable(self, "_send"))
 	var tune: Dictionary = session.get("link_tune")
 	tune.merge(PipeHost.LINK_TUNE, true)

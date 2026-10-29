@@ -4,9 +4,9 @@ extends RefCounted
 #
 # Кадры рукопожатия: сборка, разбор, ключ звена. Отдельно от Handshake.gd, чтобы вложенные классы видели статику.
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Crc32 = preload("res://mods/paxnet/core/Crc32.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Crc32 = preload("res://mods/paxnet_core/core/Crc32.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
 const MAGIC := 0xA6
 
@@ -38,7 +38,9 @@ static func tune(link: Object, t: Dictionary) -> void:
 			link.set(k, int(t[k]))
 
 
-static func link_key(cookie: PackedByteArray, nonce_c: int) -> PackedByteArray:
+## Ключ звена: из секрета гостя (его знают только гость и хост) и cookie с nonce.
+static func link_key(cookie: PackedByteArray, nonce_c: int, secret: PackedByteArray) -> PackedByteArray:
 	var m := cookie.duplicate()
 	m.append_array(Bytes.W.new().u64(nonce_c).buf)
-	return Hmac.mac(m, "pax-link".to_utf8_buffer())
+	m.append_array("pax-link".to_utf8_buffer())
+	return Hmac.mac(secret, m)

@@ -2,7 +2,7 @@ class_name PaxMod
 extends Node
 var _settings: Dictionary = {}
 var _data: Dictionary = {}
-var mod_id: String = "paxnet"
+var mod_id: String = "paxnet_core"
 func path(p: String) -> String:
 	return "res://mods/%s/%s" % [mod_id, p]
 func tr_key(k: String) -> String:

@@ -2,7 +2,7 @@ extends Node
 func _ready() -> void:
 	var bad: int = 0
 	var files: Array = []
-	_walk("res://mods/paxnet", files)
+	_walk("res://mods/paxnet_core", files)
 	for f in files:
 		var s: Variant = load(f)
 		if s == null or not (s is Script) or not (s as Script).can_instantiate():

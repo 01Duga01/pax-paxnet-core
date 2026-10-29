@@ -6,29 +6,35 @@ extends RefCounted
 #
 #   клиент → HELLO(nonce_c, proto)                    (дополнен нулями: ответ не больше запроса)
 #   хост   → CHALLENGE(nonce_c, окно времени, cookie) cookie = HMAC(секрет хоста, адрес|nonce_c|окно)
-#   клиент → CONNECT(nonce_c, окно, cookie, info)     info: имя, ключ игрока, моды, код входа, токен возврата…
-#   хост   → ACCEPT(conn_id, welcome) | REJECT(код)
+#   клиент → CONNECT(nonce_c, окно, cookie, секрет под RSA, info под секретом)
+#                                                     info: имя, ключ игрока, моды, код входа, токен возврата…
+#   хост   → ACCEPT(conn_id, welcome под секретом) | REJECT(код)
 #
-# Ключ подписи звена: HMAC(cookie|nonce_c, "pax-link") — его знают обе стороны, не видит тот, кто
-# не слышит трафик. Повтор CONNECT (потерялся ACCEPT) получает тот же ACCEPT. Кадр: [0xA6][тип][тело][crc32].
+# CHALLENGE несёт открытый RSA-ключ хоста; клиент выдумывает секрет (32 байта) и шлёт его под этим ключом.
+# Из секрета — ключ звена (подпись и AES-шифр пакетов, см. Cipher.gd) и ключ шифра info/welcome: ретранслятор
+# и сеть видят только шифртекст. Повтор CONNECT (потерялся ACCEPT) получает тот же ACCEPT. Кадр: [0xA6][тип][тело][crc32].
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Crc32 = preload("res://mods/paxnet/core/Crc32.gd")
-const Hmac = preload("res://mods/paxnet/core/Hmac.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
-const UdpLink = preload("res://mods/paxnet/core/UdpLink.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Crc32 = preload("res://mods/paxnet_core/core/Crc32.gd")
+const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
+const Cipher = preload("res://mods/paxnet_core/core/Cipher.gd")
+const UdpLink = preload("res://mods/paxnet_core/core/UdpLink.gd")
 
 const WINDOW_MS := 10000
-const HELLO_SIZE := 96
+const HELLO_SIZE := 400        # не меньше CHALLENGE (в нём открытый ключ): ответ не больше запроса
 
 
-const Fr = preload("res://mods/paxnet/core/HsFrames.gd")
+const Fr = preload("res://mods/paxnet_core/core/HsFrames.gd")
 
 
 # ===================================================================== хост
 
 class Listener extends RefCounted:
 	var secret := PackedByteArray()
+	var pin := ""                # PIN приглашения ("" — комната без защиты от посредника)
+	var rsa: CryptoKey = null
+	var pem := PackedByteArray()
 	var send_to: Callable        # (endpoint: String, bytes) -> void
 	var admit: Callable          # (endpoint, info: Dictionary, now_ms) -> {ok, code, welcome, ctx}
 	var on_link: Callable        # (ctx, link: UdpLink, endpoint) -> void
@@ -43,6 +49,8 @@ class Listener extends RefCounted:
 		secret.resize(32)
 		for i in 32:
 			secret[i] = _rng.randi() & 255
+		rsa = Cipher.host_key()
+		pem = Cipher.public_pem(rsa)
 
 	func _cookie(endpoint: String, nonce_c: int, window: int) -> PackedByteArray:
 		var m := Bytes.W.new().text(endpoint).u64(nonce_c).u32(window).buf
@@ -86,14 +94,15 @@ class Listener extends RefCounted:
 					send_to.call(endpoint, Fr.frame(Proto.H_REJECT, Bytes.W.new().text(Proto.ERR_VERSION).buf))
 					return
 				var window := now_ms / WINDOW_MS
-				var w := Bytes.W.new().u64(nonce_c).u32(window).raw(_cookie(endpoint, nonce_c, window))
+				var w := Bytes.W.new().u64(nonce_c).u32(window).raw(_cookie(endpoint, nonce_c, window)).bytes(pem)
 				send_to.call(endpoint, Fr.frame(Proto.H_CHALLENGE, w.buf))
 			Proto.H_CONNECT:
 				var nonce_c2 := r.u64()
 				var window2 := r.u32()
 				var cookie := r.raw_n(16)
-				var info = r.variant()
-				if not r.ok or not (info is Dictionary):
+				var wrapped := r.bytes()
+				var sealed_info := r.bytes()
+				if not r.ok:
 					return
 				var cur := now_ms / WINDOW_MS
 				if window2 != cur and window2 != cur - 1:
@@ -104,6 +113,16 @@ class Listener extends RefCounted:
 				if known != null and known["nonce"] == nonce_c2:
 					send_to.call(endpoint, known["accept"])   # ACCEPT потерялся
 					return
+				var sec := Cipher.unwrap_secret(rsa, wrapped)
+				if sec.is_empty():
+					return
+				sec = Cipher.bind(sec, pin)
+				var plain = Cipher.open_mac(sec, "pax-hs-c", sealed_info)
+				if plain == null:
+					return
+				var info = Bytes.R.new(plain).variant()
+				if not (info is Dictionary):
+					return
 				var d: Dictionary = admit.call(endpoint, info, now_ms)
 				if not d.get("ok", false):
 					send_to.call(endpoint, Fr.frame(Proto.H_REJECT, Bytes.W.new().text(str(d.get("code", "code"))).buf))
@@ -113,13 +132,13 @@ class Listener extends RefCounted:
 				var conn := 0
 				while conn == 0 or _entries.has(conn):
 					conn = _rng.randi()
-				var key := Fr.link_key(cookie, nonce_c2)
+				var key := Fr.link_key(cookie, nonce_c2, sec)
 				var link := UdpLink.new(conn, key)
 				link.mtu = mtu
 				Fr.tune(link, link_tune)
 				var ent := {"link": link, "endpoint": endpoint, "ctx": d.get("ctx")}
 				link.send_fn = func(b: PackedByteArray): send_to.call(ent["endpoint"], b)
-				var acc := Fr.frame(Proto.H_ACCEPT, Bytes.W.new().u32(conn).variant(d.get("welcome", {})).buf)
+				var acc := Fr.frame(Proto.H_ACCEPT, Bytes.W.new().u32(conn).bytes(Cipher.seal_mac(sec, "pax-hs-s", Bytes.W.new().variant(d.get("welcome", {})).buf)).buf)
 				_entries[conn] = ent
 				_by_endpoint[endpoint] = {"nonce": nonce_c2, "accept": acc, "conn": conn}
 				send_to.call(endpoint, acc)
@@ -145,9 +164,12 @@ class Dialer extends RefCounted:
 	var retry_ms := 250
 	var give_up_ms := 8000
 	var link_tune := {}          # настройки нового звена от транспорта
+	var pin := ""                # PIN из приглашения
 	var _nonce := 0
 	var _cookie := PackedByteArray()
 	var _window := 0
+	var _secret := PackedByteArray()
+	var _connect := PackedByteArray()   # готовые (секрет под RSA, info под секретом) для повторов CONNECT
 	var _started := -1
 	var _last := -100000
 	var link
@@ -178,7 +200,7 @@ class Dialer extends RefCounted:
 				w.u8(0)
 			send_fn.call(Fr.frame(Proto.H_HELLO, w.buf))
 		else:
-			var w2 := Bytes.W.new().u64(_nonce).u32(_window).raw(_cookie).variant(info)
+			var w2 := Bytes.W.new().u64(_nonce).u32(_window).raw(_cookie).raw(_connect)
 			send_fn.call(Fr.frame(Proto.H_CONNECT, w2.buf))
 
 	func on_datagram(data: PackedByteArray, now_ms: int) -> void:
@@ -196,8 +218,15 @@ class Dialer extends RefCounted:
 				var n := r.u64()
 				var win := r.u32()
 				var ck := r.raw_n(16)
+				var pub := r.bytes()
 				if not r.ok or n != _nonce:
 					return
+				var raw_secret := Cipher.random_bytes(Cipher.SECRET_LEN)
+				var wrapped := Cipher.wrap_secret(pub, raw_secret)
+				if wrapped.is_empty():
+					return
+				_secret = Cipher.bind(raw_secret, pin)
+				_connect = Bytes.W.new().bytes(wrapped).bytes(Cipher.seal_mac(_secret, "pax-hs-c", Bytes.W.new().variant(info).buf)).buf
 				_cookie = ck
 				_window = win
 				state = "connect"
@@ -207,11 +236,15 @@ class Dialer extends RefCounted:
 				if state != "connect":
 					return
 				var conn := r.u32()
-				var welcome = r.variant()
+				var sealed := r.bytes()
 				if not r.ok:
 					return
+				var plain = Cipher.open_mac(_secret, "pax-hs-s", sealed)
+				if plain == null:
+					return
+				var welcome = Bytes.R.new(plain).variant()
 				state = "connected"
-				link = UdpLink.new(conn, Fr.link_key(_cookie, _nonce))
+				link = UdpLink.new(conn, Fr.link_key(_cookie, _nonce, _secret))
 				link.mtu = mtu
 				Fr.tune(link, link_tune)
 				link.send_fn = send_fn

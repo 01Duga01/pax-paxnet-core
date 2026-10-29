@@ -5,8 +5,8 @@ extends RefCounted
 # Большие надёжные сообщения (лобби со списком стран, малые лечебные куски мира) режутся на
 # части по порядку; соединение надёжное и упорядоченное, поэтому собрать их просто.
 
-const Bytes = preload("res://mods/paxnet/core/Bytes.gd")
-const Proto = preload("res://mods/paxnet/core/Proto.gd")
+const Bytes = preload("res://mods/paxnet_core/core/Bytes.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 static var _next_id := 1
 
