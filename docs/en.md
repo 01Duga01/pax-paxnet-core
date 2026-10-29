@@ -974,6 +974,12 @@ func add_point(player: String) -> void:
 >
 > Computing a dictionary checksum with the built-in `hash(dictionary)`. It depends on the order in which keys were added and gives two players different numbers for identical data. Then healing will fire endlessly. Use `lib.state_hash(v)` or a sum over pairs, as in the example.
 
+### A guest's treasury after divergences
+
+A guest reports its treasury to the host (on change and at least every 10 seconds). The host keeps a treasury ledger: it records what is reported and moves the entries on confirmed deals. If a guest has no treasury (after a world reload, a rejoin, a fresh game launch), the host forwards the recorded amount. The guest accepts it only when it has no treasury of its own and only once, until its own treasury appears. The ledger is saved with the host's game.
+
+If the game has no treasury getter, the guest counts as having none: the host forwards the recorded amount once.
+
 ### Deals between players
 
 The core mailbox (letters of kind `war`, `peace`, `alliance`, `trade`, `coruler`, `letter`) checks trade deals twice: when the letter is sent and when the deal is executed. The amount (`terms.amount`) must be a number from zero up to 10<sup>12</sup>. A deal runs in two steps: the host asks the **giver** to debit the amount, the giver answers, and only after that confirmation does the recipient get the money. A confirmation is accepted once and only from the giver. A deal with a negative amount is rejected with `illegal`.

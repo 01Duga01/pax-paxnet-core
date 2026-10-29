@@ -28,6 +28,15 @@ const MSG_DEAL: String = "paxnet.deal"
 const MSG_DEBIT: String = "paxnet.deal_debit"
 const MSG_PAID: String = "paxnet.deal_paid"
 const MAX_PENDING_DEBITS: int = 64
+## Казна гостя: гость сообщает её хосту (MSG_TREASURY), хост ведёт книгу (_ledger). Если у гостя казны нет
+## (после перезагрузки мира, повторного входа, нового запуска), хост пересылает записанную (MSG_TREASURY_SET).
+const MSG_TREASURY: String = "paxnet.treasury"
+const MSG_TREASURY_SET: String = "paxnet.treasury_set"
+const TREASURY_REPORT_MS: int = 10000       # гость напоминает о казне хотя бы раз в это время
+const TREASURY_ABSENT_MS: int = 2000        # пока казны нет, спрашиваем чаще
+const TREASURY_MIN_GAP_MS: int = 500        # хост слушает одного гостя не чаще
+const TREASURY_SET_GAP_MS: int = 5000       # и пересылает ему не чаще
+const MAX_MONEY: float = 1.0e15
 
 ## PaxMod библиотеки: настройки (ключ игрока) и перевод.
 var mod: Object = null
@@ -36,6 +45,13 @@ var resume_state: Dictionary = {}
 ## Хост: ждём подтверждения списания. id → {pid, to, from, amt}.
 var _debits: Dictionary = {}
 var _debit_seq: int = 0
+## Хост: страна → казна, как её в последний раз сообщил гость (и как менялась сделками).
+var _ledger: Dictionary = {}
+var _ledger_seen_ms: Dictionary = {}       # id игрока → когда слушали последний раз
+var _ledger_sent_ms: Dictionary = {}       # id игрока → когда пересылали последний раз
+var _treasury_sent_ms: int = -100000       # гость: когда сообщали последний раз
+var _treasury_last: float = NAN
+var _treasury_applied: bool = false        # гость: пересланную казну уже приняли (повторно не начисляем)
 var settings: Dictionary = {"time_mode": "host", "join_in_progress": true, "allow_coruler": true, "max_players": 5}
 var progress_what: String = ""
 var progress_ratio: float = 1.0
@@ -110,6 +126,7 @@ func host_open(display_name_: String, rules: Dictionary = {}) -> String:
 func _prepare_host(_cfg: Dictionary) -> void:
 	if not resume_state.is_empty():
 		session.call("load_state", resume_state)
+		_load_ledger(resume_state.get("ledger", {}))
 	var g: Object = _game()
 	if g != null:
 		session.call("lobby_cmd", HOST_ID, {"op": "seat", "seat": int(adapter.call("seat_of_country", str(g.call("country")))), "role": "player"})
@@ -186,6 +203,8 @@ func _process(d: float) -> void:
 		_reload_pending = false
 		_last_reload_ms = now
 		adapter.call("flush_reload", guest_slot())
+	if role == "guest":
+		_report_treasury(now)
 
 
 func reload_world_later() -> void:
@@ -213,6 +232,12 @@ func _on_message(from_id: int, type: String, data: Variant) -> void:
 		return
 	if type == MSG_PAID and role == "host" and data is Dictionary:
 		_on_debit_paid(from_id, data)
+		return
+	if type == MSG_TREASURY and role == "host" and data is Dictionary:
+		_on_treasury_report(from_id, data)
+		return
+	if type == MSG_TREASURY_SET and role == "guest" and from_id == HOST_ID and data is Dictionary:
+		_on_treasury_set(data)
 		return
 	app_message.emit(from_id, type, data)
 
@@ -327,7 +352,102 @@ func _on_debit_paid(from_id: int, d: Dictionary) -> void:
 	_debits.erase(id)
 	var g: Object = _game()
 	if g != null and bool(d.get("ok", false)):
+		_ledger_move(str(p["from"]), str(p["to"]), float(p["amt"]))
 		_credit(g, str(g.call("country")), str(p["to"]), str(p["from"]), float(p["amt"]))
+
+
+# ------------------------------------------------------------------ казна гостя
+
+# Есть ли у гостя своя казна: геттер есть и отдаёт число.
+func _own_money(g: Object) -> float:
+	if g == null or not g.has_method("money"):
+		return NAN
+	var v = g.call("money")
+	if (v is int or v is float) and not is_nan(float(v)) and not is_inf(float(v)):
+		return float(v)
+	return NAN
+
+
+# Гость: сообщить хосту казну (при изменении, раз в TREASURY_REPORT_MS, а если казны нет, то чаще).
+func _report_treasury(now: int) -> void:
+	if not active():
+		return
+	var g: Object = _game()
+	if g == null:
+		return
+	var cur: float = _own_money(g)
+	var absent: bool = is_nan(cur)
+	if not absent:
+		_treasury_applied = false    # казна на месте: пересланную можно принять снова, если она пропадёт
+	var gap: int = TREASURY_ABSENT_MS if absent else TREASURY_REPORT_MS
+	var changed: bool = not absent and (is_nan(_treasury_last) or absf(cur - _treasury_last) > 0.005)
+	if now - _treasury_sent_ms < TREASURY_MIN_GAP_MS or (not changed and now - _treasury_sent_ms < gap):
+		return
+	_treasury_sent_ms = now
+	_treasury_last = cur
+	send(HOST_ID, MSG_TREASURY, {"have": not absent, "amount": 0.0 if absent else cur})
+
+
+# Хост: гость сообщил казну. Записываем; если у гостя казны нет, а у нас она записана, пересылаем.
+func _on_treasury_report(from_id: int, d: Dictionary) -> void:
+	var country: String = _country_of_player(from_id)
+	if country == "":
+		return
+	var now: int = Time.get_ticks_msec()
+	if now - int(_ledger_seen_ms.get(from_id, -100000)) < TREASURY_MIN_GAP_MS:
+		return
+	_ledger_seen_ms[from_id] = now
+	var have: bool = bool(d.get("have", false))
+	var amount = d.get("amount", 0.0)
+	if have and (amount is int or amount is float) and not is_nan(float(amount)) and not is_inf(float(amount)):
+		_ledger[country] = clampf(float(amount), -MAX_MONEY, MAX_MONEY)
+		return
+	if not have and _ledger.has(country) and now - int(_ledger_sent_ms.get(from_id, -100000)) >= TREASURY_SET_GAP_MS:
+		_ledger_sent_ms[from_id] = now
+		send(from_id, MSG_TREASURY_SET, {"amount": float(_ledger[country])})
+
+
+# Гость: хост переслал записанную казну. Принимается только если своей казны нет.
+func _on_treasury_set(d: Dictionary) -> void:
+	var g: Object = _game()
+	var amount = d.get("amount", null)
+	if g == null or not (amount is int or amount is float) or is_nan(float(amount)) or is_inf(float(amount)):
+		return
+	if not is_nan(_own_money(g)) or _treasury_applied:
+		return
+	_treasury_applied = true
+	g.call("add_money", clampf(float(amount), -MAX_MONEY, MAX_MONEY))
+	_treasury_last = NAN
+	_treasury_sent_ms = -100000     # сразу сообщить восстановленное
+
+
+func _country_of_player(pid: int) -> String:
+	for c in adapter.call("countries"):
+		if c is Dictionary and player_of_seat(int(c.get("id", -1))) == str(pid):
+			return str(c.get("name", ""))
+	return ""
+
+
+# Сделка двигает казну в книге хоста (сообщения гостей потом уточнят).
+func _ledger_move(from_country: String, to_country: String, amt: float) -> void:
+	if _ledger.has(from_country):
+		_ledger[from_country] = clampf(float(_ledger[from_country]) - amt, -MAX_MONEY, MAX_MONEY)
+	if _ledger.has(to_country):
+		_ledger[to_country] = clampf(float(_ledger[to_country]) + amt, -MAX_MONEY, MAX_MONEY)
+
+
+func ledger_snapshot() -> Dictionary:
+	return _ledger.duplicate()
+
+
+func _load_ledger(v) -> void:
+	_ledger = {}
+	if not (v is Dictionary):
+		return
+	for k in v:
+		var x = v[k]
+		if (x is int or x is float) and not is_nan(float(x)) and not is_inf(float(x)):
+			_ledger[str(k)] = clampf(float(x), -MAX_MONEY, MAX_MONEY)
 
 
 func _treasury_ok(g: Object, amount: float) -> bool:

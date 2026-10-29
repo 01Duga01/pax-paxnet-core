@@ -91,6 +91,7 @@ func _save_state(_game: PaxGame) -> Dictionary:
 	var st: Dictionary = session.call("save_state")
 	st["code"] = str(svc.call("room_code"))
 	st["pin"] = str(svc.call("pin"))
+	st["ledger"] = svc.call("ledger_snapshot")
 	return {"session": st}
 
 
