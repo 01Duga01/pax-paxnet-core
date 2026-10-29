@@ -23,7 +23,8 @@ const UdpLink = preload("res://mods/paxnet_core/core/UdpLink.gd")
 
 const WINDOW_MS := 10000
 const PIN_TOTAL := 24          # длина PIN приглашения (см. Relay.PIN_LEN); последние FP_LEN знаков - отпечаток ключа хоста
-const HELLO_SIZE := 400        # не меньше CHALLENGE (в нём открытый ключ): ответ не больше запроса
+const HELLO_SIZE := 560        # не меньше CHALLENGE (в нём открытый ключ): ответ не больше запроса (против усиления атаки)
+const MAX_LINKS := 4096
 
 
 const Fr = preload("res://mods/paxnet_core/core/HsFrames.gd")
@@ -62,6 +63,33 @@ class Listener extends RefCounted:
 		_rsa_tokens -= 1.0
 		return true
 
+	# Ведро токенов: ключ -> [токены, мс]. Дёшево отсекает потоки пакетов до проверки подписи и тем более RSA.
+	var _hs_ep := {}             # адрес -> ведро рукопожатия
+	var _link_conn := {}         # conn_id -> ведро пакетов звена
+	var _hs_all := [600.0, 0]    # общее ведро кадров рукопожатия
+
+	static func _take(buckets: Dictionary, key, now_ms: int, rate: float, burst: float) -> bool:
+		if buckets.size() > 8192:
+			buckets.clear()
+		var b: Array = buckets.get(key, [burst, now_ms])
+		b[0] = minf(float(b[0]) + float(now_ms - int(b[1])) / 1000.0 * rate, burst)
+		b[1] = now_ms
+		buckets[key] = b
+		if float(b[0]) < 1.0:
+			return false
+		b[0] = float(b[0]) - 1.0
+		return true
+
+	func _handshake_allowed(endpoint: String, now_ms: int) -> bool:
+		_hs_all[0] = minf(float(_hs_all[0]) + float(now_ms - int(_hs_all[1])) / 1000.0 * 300.0, 600.0)
+		_hs_all[1] = now_ms
+		if float(_hs_all[0]) < 1.0:
+			return false
+		if not _take(_hs_ep, endpoint, now_ms, 20.0, 40.0):
+			return false
+		_hs_all[0] = float(_hs_all[0]) - 1.0
+		return true
+
 	func _fail(endpoint: String, now_ms: int) -> void:
 		if _bad.size() > 2048:
 			_bad.clear()
@@ -98,6 +126,8 @@ class Listener extends RefCounted:
 		var e = _entries.get(conn)
 		if e == null:
 			return
+		if not _take(_link_conn, conn, now_ms, 800.0, 1600.0):
+			return                  # поток пакетов звена: отбрасываем до проверки подписи
 		var link = e["link"]
 		var before: int = link.stats["recv_packets"]
 		link.receive(data, now_ms)
@@ -107,6 +137,8 @@ class Listener extends RefCounted:
 			e["endpoint"] = endpoint
 
 	func _on_handshake(endpoint: String, data: PackedByteArray, now_ms: int) -> void:
+		if not _handshake_allowed(endpoint, now_ms):
+			return
 		var p := Fr.parse(data)
 		if p.is_empty():
 			return
@@ -140,7 +172,7 @@ class Listener extends RefCounted:
 				if known != null and known["nonce"] == nonce_c2:
 					send_to.call(endpoint, known["accept"])   # ACCEPT потерялся
 					return
-				if not _rsa_allowed(endpoint, now_ms):
+				if _entries.size() >= MAX_LINKS or not _rsa_allowed(endpoint, now_ms):
 					return
 				var sec := Cipher.unwrap_secret(rsa, wrapped)
 				if sec.is_empty():
