@@ -1,0 +1,13 @@
+config_version=5
+
+[application]
+config/name="paxnet_test"
+
+[autoload]
+Pax="*res://stubs/Pax.gd"
+Network="*res://stubs/Network.gd"
+
+[debug]
+gdscript/warnings/inference_on_variant=2
+gdscript/warnings/unsafe_property_access=0
+gdscript/warnings/unsafe_method_access=0

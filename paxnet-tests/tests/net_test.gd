@@ -1,0 +1,221 @@
+extends Node
+## Сетевой тест библиотеки на виртуальном ретрансляторе (задержка 40 мс, надёжно и по порядку).
+
+const FakeRelay = preload("res://tests/FakeRelay.gd")
+const ToyAdapter = preload("res://tests/ToyAdapter.gd")
+const PaxNetLib = preload("res://mods/paxnet/net/PaxNetLib.gd")
+const Proto = preload("res://mods/paxnet/core/Proto.gd")
+
+var relay: FakeRelay = FakeRelay.new()
+var lib: Node = null
+var fails: int = 0
+var passes: int = 0
+var got: Dictionary = {}   # имя сессии -> [[from, type, data]]
+
+
+func ok(cond: bool, what: String) -> void:
+	if cond:
+		passes += 1
+		print("  ok   ", what)
+	else:
+		fails += 1
+		print("  FAIL ", what)
+
+
+func wait_until(cond: Callable, timeout_ms: int = 8000) -> bool:
+	var t0: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < timeout_ms:
+		if bool(cond.call()):
+			return true
+		await get_tree().process_frame
+	return bool(cond.call())
+
+
+func wait_ms(ms: int) -> void:
+	var t0: int = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < ms:
+		await get_tree().process_frame
+
+
+func track(s: Node, name: String) -> void:
+	got[name] = []
+	s.connect("message", func(from: int, type: String, data: Variant) -> void: (got[name] as Array).append([from, type, data]))
+
+
+func msgs(name: String, type: String) -> Array:
+	return (got[name] as Array).filter(func(m: Array) -> bool: return str(m[1]) == type)
+
+
+func _ready() -> void:
+	(get_node("/root/Network") as Object).set("fake_factory", relay.factory())
+	lib = PaxNetLib.new()
+	lib.name = "PaxNetLib"
+	get_tree().root.add_child.call_deferred(lib)
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await test_lobby_and_messages()
+	await test_world_sync()
+	await test_errors()
+	print("RESULT passed=%d failed=%d" % [passes, fails])
+	get_tree().quit(1 if fails > 0 else 0)
+
+
+func test_lobby_and_messages() -> void:
+	print("== лобби, сообщения, обрыв канала, уход хоста")
+	var h: Node = lib.call("new_session")
+	h.set("pipe_factory", relay.factory())
+	var a: Node = lib.call("new_session")
+	a.set("pipe_factory", relay.factory())
+	a.set("player_key", "key-a")
+	# гость B идёт настоящим путём: RelayPipe → узел /root/Network → relay_pipe()
+	var b: Node = lib.call("new_session")
+	b.set("player_key", "key-b")
+	await get_tree().process_frame
+	for p in [[h, "h"], [a, "a"], [b, "b"]]:
+		track(p[0], p[1])
+	ok(str(h.call("host", "Хост", null, {"max_players": 4})) == "", "хост открыл комнату")
+	ok(await wait_until(func() -> bool: return str(h.get("status")) == "lobby"), "хост в лобби")
+	var code: String = str(h.call("code"))
+	ok(code.length() == 8, "код комнаты " + code)
+	ok(str(h.call("invite_link")).ends_with("/j/" + code), "ссылка-приглашение")
+	ok(str(a.call("join", "https://mp.paxuniverse.ru/j/" + code, "Аня")) == "", "гость A входит по ссылке")
+	ok(str(b.call("join", "pax-" + code.to_lower(), "Борис")) == "", "гость B входит по коду PAX-…")
+	ok(await wait_until(func() -> bool: return str(a.get("status")) == "lobby" and str(b.get("status")) == "lobby"), "оба гостя в лобби")
+	ok(await wait_until(func() -> bool: return (h.call("players") as Array).size() == 3 and (a.call("players") as Array).size() == 3 and (b.call("players") as Array).size() == 3), "у всех трое в составе")
+	var aid: int = int(a.call("my_id"))
+	var bid: int = int(b.call("my_id"))
+	ok(aid >= 2 and bid >= 2 and aid != bid, "номера гостей %d, %d" % [aid, bid])
+	ok(str(a.call("player_name", 1)) == "Хост", "гость видит имя хоста")
+
+	# сообщения: порядок, ровно один раз, адресация
+	for i in range(60):
+		a.call("send", 1, "t.seq", i)
+	h.call("broadcast", "t.all", {"x": 1})
+	a.call("send", bid, "t.direct", "привет B")
+	ok(await wait_until(func() -> bool: return msgs("h", "t.seq").size() == 60 and msgs("b", "t.direct").size() == 1 and msgs("a", "t.all").size() == 1 and msgs("b", "t.all").size() == 1), "сообщения дошли")
+	var seq: Array = msgs("h", "t.seq").map(func(m: Array) -> int: return int(m[2]))
+	ok(seq == range(60), "60 сообщений по порядку, без повторов")
+	ok(int(msgs("h", "t.seq")[0][0]) == aid, "хост знает автора")
+	ok(int(msgs("b", "t.direct")[0][0]) == aid and msgs("h", "t.direct").is_empty() and msgs("a", "t.direct").is_empty(), "личное сообщение A→B только B, автор A")
+
+	# большое сообщение: 300 КБ случайных байт (части, сжатие)
+	var big: PackedByteArray = Crypto.new().generate_random_bytes(300000)
+	h.call("send", aid, "t.big", big)
+	ok(await wait_until(func() -> bool: return msgs("a", "t.big").size() == 1, 15000), "300 КБ дошли")
+	if msgs("a", "t.big").size() == 1:
+		ok((msgs("a", "t.big")[0][2] as PackedByteArray) == big, "300 КБ совпали байт в байт")
+
+	# готовность, чат, время
+	a.call("set_ready", true)
+	ok(await wait_until(func() -> bool:
+		for p in h.call("players"):
+			if int((p as Dictionary)["id"]) == aid:
+				return bool((p as Dictionary)["ready"])
+		return false), "готовность гостя видна хосту")
+
+	# старт партии
+	var r: Dictionary = h.call("start")
+	ok(bool(r.get("ok", false)), "старт")
+	ok(await wait_until(func() -> bool: return str(a.get("status")) == "playing" and str(b.get("status")) == "playing"), "гости играют (мир получен)")
+
+	# обрыв канала гостя A: ретранслятор потерял его соединение
+	var tr: Object = a.get("transport")
+	var pipe_a: Object = tr.get("pipe")
+	relay.cut(pipe_a as FakeRelay.Pipe)
+	# пока A без связи - хост и B пишут ему, A пишет хосту
+	for i in range(20):
+		h.call("send", aid, "t.during", i)
+		b.call("send", aid, "t.during_b", i)
+		a.call("send", 1, "t.from_a", i)
+		await get_tree().process_frame
+	ok(await wait_until(func() -> bool: return int((tr.get("stats") as Dictionary)["rejoined"]) >= 1, 10000), "A вошёл в комнату заново")
+	ok(await wait_until(func() -> bool: return msgs("a", "t.during").size() == 20 and msgs("a", "t.during_b").size() == 20 and msgs("h", "t.from_a").size() == 20, 15000), "всё, что слали во время обрыва, дошло")
+	ok(msgs("a", "t.during").map(func(m: Array) -> int: return int(m[2])) == range(20), "…по порядку и ровно раз (хост→A)")
+	ok(msgs("h", "t.from_a").map(func(m: Array) -> int: return int(m[2])) == range(20), "…по порядку и ровно раз (A→хост)")
+	ok(int(a.call("my_id")) == aid, "A под тем же номером")
+	ok(str(a.get("status")) == "playing", "A снова играет")
+
+	# уход хоста
+	h.call("leave")
+	ok(await wait_until(func() -> bool: return str(a.get("status")) == "closed" and str(b.get("status")) == "closed"), "гости узнали, что хост закрыл партию")
+	ok(str((a.get("last_notice") as Dictionary).get("code", "")) == Proto.ERR_HOST_LEFT, "причина: host_left")
+	a.call("leave")
+	b.call("leave")
+	for s in [h, a, b]:
+		(s as Node).queue_free()
+
+
+func test_world_sync() -> void:
+	print("== мир: изменения шага разницей, лечение разошедшегося раздела, возврат гостя")
+	var hw: ToyAdapter = ToyAdapter.new()
+	hw.sections = {"money": {"A": 100, "B": 50}, "owners": {"1": "A", "2": "B"}, "big": {}}
+	for i in range(400):
+		(hw.sections["big"] as Dictionary)["k%d" % i] = i
+	var gw: ToyAdapter = ToyAdapter.new()
+	var h: Node = lib.call("new_session")
+	h.set("pipe_factory", relay.factory())
+	var g: Node = lib.call("new_session")
+	g.set("pipe_factory", relay.factory())
+	g.set("player_key", "key-g")
+	await get_tree().process_frame
+	h.call("host", "Хост", hw, {"authority": true, "external_time": true, "push_min_ms": 0})
+	await wait_until(func() -> bool: return str(h.get("status")) == "lobby")
+	g.call("join", str(h.call("code")), "Гость", gw)
+	ok(await wait_until(func() -> bool: return str(g.get("status")) == "lobby"), "гость в лобби")
+	g.call("choose_seat", 1)
+	h.call("choose_seat", 0)
+	await wait_ms(300)
+	h.call("start")
+	ok(await wait_until(func() -> bool: return gw.installed == 1 and str(g.get("status")) == "playing"), "мир доставлен")
+	ok(gw.sections == hw.sections, "мир гостя = мир хоста")
+	var hs: Object = h.get("session")
+	# шаги мира: хост меняет разделы, фиксирует шаг
+	for step in range(10):
+		(hw.sections["money"] as Dictionary)["A"] = 100 + step
+		(hw.sections["big"] as Dictionary)["k%d" % step] = -step
+		hw.day += 1
+		hs.call("record_step", 1, 0)
+		await wait_ms(30)
+	ok(await wait_until(func() -> bool: return gw.sections == hw.sections), "10 шагов: изменения дошли разницей")
+	# порча у гостя: сверка по суммам находит и лечит раздел
+	(gw.sections["owners"] as Dictionary)["2"] = "ВЗЛОМ"
+	(hw.sections["money"] as Dictionary)["B"] = 77
+	hs.call("record_step", 1, 0)
+	ok(await wait_until(func() -> bool: return gw.sections == hw.sections, 6000), "испорченный раздел вылечен")
+	var gs: Object = g.get("session")
+	ok(int((gs.get("stats") as Dictionary)["resyncs"]) >= 1, "лечение по разделу (resync=%d), мир целиком не пересылался (worlds=%d)" % [int((gs.get("stats") as Dictionary)["resyncs"]), int((gs.get("stats") as Dictionary)["worlds"])])
+	ok(int((gs.get("stats") as Dictionary)["worlds"]) == 1, "мир целиком - только при входе")
+	# приказ гостя: по правилам «own» с местом - доходит до шага хоста
+	var c: Variant = g.call("action", "x.test", {"v": 1})
+	ok(int(c) == 1, "приказ гостя принят к отправке")
+	# гость перезапускает игру: новая сессия с тем же ключом - то же место, мир снова
+	g.call("leave")
+	await wait_ms(200)
+	var g2: Node = lib.call("new_session")
+	g2.set("pipe_factory", relay.factory())
+	g2.set("player_key", "key-g")
+	await get_tree().process_frame
+	var gw2: ToyAdapter = ToyAdapter.new()
+	g2.call("join", str(h.call("code")), "Гость", gw2)
+	ok(await wait_until(func() -> bool: return str(g2.get("status")) == "playing" and gw2.sections == hw.sections), "вернулся после перезапуска: тот же мир")
+	var seat: int = -1
+	for p in h.call("players"):
+		if str((p as Dictionary)["name"]) == "Гость":
+			seat = int((p as Dictionary)["seat"])
+	ok(seat == 1, "то же место (seat=%d)" % seat)
+	h.call("leave")
+	g2.call("leave")
+	for s in [h, g, g2]:
+		(s as Node).queue_free()
+
+
+func test_errors() -> void:
+	print("== ошибки входа")
+	var g: Node = lib.call("new_session")
+	g.set("pipe_factory", relay.factory())
+	await get_tree().process_frame
+	ok(str(g.call("join", "плохо!", "X")) == Proto.ERR_CODE, "мусор вместо кода - ERR_CODE сразу")
+	ok(str(g.call("join", "ZZZZ2222", "X")) == "", "несуществующий код принят к входу")
+	ok(await wait_until(func() -> bool: return str(g.get("status")) == "failed"), "…и честно провален")
+	ok(str((g.get("last_notice") as Dictionary).get("what", "")) == "paxnet_err_code", "понятная причина: paxnet_err_code")
+	g.queue_free()

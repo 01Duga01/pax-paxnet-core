@@ -1,0 +1,25 @@
+{
+	"$schema": "../../docs/modding/schemas/mod.schema.json",
+	"api": 1.0,
+	"authors": [
+		"Duga"
+	],
+	"depends": [],
+	"description": {
+		"en": "Multiplayer library for other mods. MPL 2.0.",
+		"ru": "Библиотека сетевой игры для других модов. MPL 2.0."
+	},
+	"entry": "main.gd",
+	"game_version": ">=0.9.0",
+	"id": "paxnet_core",
+	"load_after": [],
+	"name": {
+		"en": "PaxNet Core",
+		"ru": "PaxNet Core"
+	},
+	"tags": [
+		"library",
+		"multiplayer"
+	],
+	"version": "1.0.0"
+}
