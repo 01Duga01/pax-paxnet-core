@@ -974,11 +974,19 @@ func add_point(player: String) -> void:
 >
 > Computing a dictionary checksum with the built-in `hash(dictionary)`. It depends on the order in which keys were added and gives two players different numbers for identical data. Then healing will fire endlessly. Use `lib.state_hash(v)` or a sum over pairs, as in the example.
 
-### A guest's treasury after divergences
+### A guest's treasury and cheat protection
 
-A guest reports its treasury to the host (on change and at least every 10 seconds). The host keeps a treasury ledger: it records what is reported and moves the entries on confirmed deals. If a guest has no treasury (after a world reload, a rejoin, a fresh game launch), the host forwards the recorded amount. The guest accepts it only when it has no treasury of its own and only once, until its own treasury appears. The ledger is saved with the host's game.
+A guest's treasury lives on the guest, so the host does not take it on trust. The guest reports its treasury and its deal total (with a hash of the amounts rounded to cents), and the host checks:
 
-If the game has no treasury getter, the guest counts as having none: the host forwards the recorded amount once.
+1. **Deal total.** The host itself knows what it debited and credited through confirmed deals. The guest's hash must match the host's. A mismatch has to repeat for three reports in a row (a report may have crossed a deal in flight), otherwise it is a `deals_hash` violation.
+2. **Treasury growth.** Excluding deals, the treasury cannot grow faster than a ceiling over the elapsed game days: `(treasury_growth_floor + treasury_growth_rel * previous treasury) * days + treasury_tolerance`. The days come from the host's world, the guest does not control them. Violation: `growth`. The first report is accepted as the baseline.
+3. **Report integrity.** The deal-total hash must match the number sent (`bad_hash`), and the fields must be numbers (`malformed`).
+
+A violator is blocked: deals of their country are rejected (both as giver and as recipient), the host gets the `cheat_suspected(player_id, country, kind)` signal and a log entry. After `treasury_strikes_to_kick` (3) violations the player is disconnected. The block is lifted after `treasury_clean_to_clear` (12) honest reports in a row.
+
+If a guest has no treasury (after a world reload, a rejoin, a fresh game launch), the host forwards the recorded amount. The guest accepts it only when it has no treasury of its own and only once, until its own treasury appears. The ledger is saved with the host's game.
+
+The ceilings are properties of the service (`treasury_growth_floor`, `treasury_growth_rel`, `treasury_tolerance`, `treasury_strikes_to_kick`, `treasury_clean_to_clear`). Cheating below the ceiling is invisible to this check: it catches jumps, not slow fraud.
 
 ### Deals between players
 
@@ -1133,7 +1141,7 @@ Pax Universe checks every mod **before** launch and refuses to run a mod that br
 > - **The host sees everything.** Encryption runs between a player and the host. By definition the host decrypts everything sent to it and forwards it to the others.
 > - **Guard the invite.** Anyone who saw the invite together with the PIN (for example in a public chat) can join the room as an ordinary guest.
 > - **The raw channel** (`open_pipe`, recipe 6) bypasses PaxNet encryption: protect your own protocol yourself.
-> - **A guest's treasury and client honesty.** Money and other sections of a guest's country live on the guest. A modified client can lie about its treasury (see the section on deals).
+> - **A guest's treasury and client honesty.** Money and other sections of a guest's country live on the guest. A modified client can lie about its treasury: the host catches jumps (see the treasury section) but not slow fraud.
 > - **A save file contains the PIN.** The host's save stores the room PIN so old invites keep working after a restart. The permanent player key no longer goes in. Do not publish a save while the room is still needed.
 > - **Discord.** If a mod shows the invite with the PIN in Discord status, Discord servers and everyone who sees the profile can see the PIN.
 > - **Lifetime.** RSA-1024 and AES-128 are chosen as light and sufficient for the duration of a game (hours, a day), not for years of stored recorded traffic.

@@ -13,11 +13,14 @@ extends "res://mods/paxnet_core/net/Session.gd"
 
 const GameAdapter = preload("res://mods/paxnet_core/game/GameAdapter.gd")
 const Mailbox = preload("res://mods/paxnet_core/core/Mailbox.gd")
+const StateHash = preload("res://mods/paxnet_core/core/StateHash.gd")
 
 signal lobby_changed
 signal connection_lost(why: String)
 signal app_message(from_id: int, type: String, data: Variant)
 signal state_changed(state: Dictionary)
+## Хост: у игрока казна ведёт себя как у модифицированного клиента. kind: bad_hash | deals_hash | growth | malformed.
+signal cheat_suspected(player_id: int, country: String, kind: String)
 
 const NODE_NAME: String = "PaxNetWorld"
 const RELOAD_GAP_MS: int = 30000
@@ -51,6 +54,8 @@ var _ledger_seen_ms: Dictionary = {}       # id игрока → когда сл
 var _ledger_sent_ms: Dictionary = {}       # id игрока → когда пересылали последний раз
 var _treasury_sent_ms: int = -100000       # гость: когда сообщали последний раз
 var _treasury_last: float = NAN
+var _boot: int = randi()                 # гость: метка запуска (после перезапуска итог сделок отсчитывается заново)
+var _deal_net: float = 0.0                # гость: итог сделок (зачислено минус списано) с начала запуска
 var _treasury_applied: bool = false        # гость: пересланную казну уже приняли (повторно не начисляем)
 var settings: Dictionary = {"time_mode": "host", "join_in_progress": true, "allow_coruler": true, "max_players": 5}
 var progress_what: String = ""
@@ -302,11 +307,14 @@ func apply_deal(kind: String, from_country: String, to_country: String, terms: D
 
 # Торговля: сначала списывает отдающий, потом получает получатель.
 func _trade(g: Object, me: String, from_country: String, to_country: String, amt: float) -> Dictionary:
+	if _is_flagged(from_country) or _is_flagged(to_country):
+		return {"ok": false, "code": "illegal"}     # страна под подозрением в накрутке казны: сделки закрыты
 	if from_country == me:
 		if not _treasury_ok(g, amt):
 			return {"ok": false, "code": "illegal"}
 		g.call("add_money", -amt)
 		_credit(g, me, to_country, from_country, amt)
+		_acct_move("", to_country, amt)
 		return {"ok": true}
 	if role != "host":
 		return {"ok": false}
@@ -340,6 +348,7 @@ func _on_debit_request(d: Dictionary) -> void:
 	var ok: bool = amt > 0.0 and _treasury_ok(g, amt)
 	if ok:
 		g.call("add_money", -amt)
+		_deal_net -= amt
 	send(HOST_ID, MSG_PAID, {"id": int(d.get("id", -1)), "ok": ok})
 
 
@@ -352,11 +361,42 @@ func _on_debit_paid(from_id: int, d: Dictionary) -> void:
 	_debits.erase(id)
 	var g: Object = _game()
 	if g != null and bool(d.get("ok", false)):
-		_ledger_move(str(p["from"]), str(p["to"]), float(p["amt"]))
+		_acct_move(str(p["from"]), str(p["to"]), float(p["amt"]))
 		_credit(g, str(g.call("country")), str(p["to"]), str(p["from"]), float(p["amt"]))
 
 
-# ------------------------------------------------------------------ казна гостя
+# ------------------------------------------------------------------ казна гостя и защита от читов
+#
+# Казна гостя живёт у самого гостя, поэтому хост ей не верит на слово. Гость сообщает хосту казну и итог сделок
+# (хеш округлённых сумм), а хост проверяет:
+#   1. итог сделок: хост сам знает, что списал и что начислил по подтверждённым сделкам; хеш гостя обязан совпасть
+#      (иначе гость не списал проданное или выдумал полученное);
+#   2. рост казны: за вычетом сделок казна не может вырасти быстрее, чем позволяют потолки за прошедшие игровые дни
+#      (день берётся из мира хоста, гость им не управляет).
+# Нарушителя блокируют: его сделки отклоняются, а повторные нарушения заканчиваются отключением.
+
+## Потолки органического роста казны за игровой день: постоянная часть и доля от прежней суммы.
+var treasury_growth_floor: float = 100000.0
+var treasury_growth_rel: float = 0.25
+var treasury_tolerance: float = 1.0
+var treasury_strikes_to_kick: int = 3
+var treasury_clean_to_clear: int = 12       # сколько честных отчётов подряд снимают блокировку
+const TREASURY_MISMATCH_TO_FLAG: int = 3    # расхождение итога сделок должно повториться (отчёт мог разминуться со сделкой)
+
+## Хост: страна → {last, day, net, net_at_last, offset, has_offset, strikes, clean, mismatch, flag, pid}.
+var _acct: Dictionary = {}
+
+
+func _acct_for(country: String) -> Dictionary:
+	if not _acct.has(country):
+		_acct[country] = {"last": NAN, "day": 0, "net": 0.0, "net_at_last": 0.0, "offset": 0.0, "has_offset": false,
+			"strikes": 0, "clean": 0, "mismatch": 0, "flag": false, "pid": -1}
+	return _acct[country]
+
+
+func _is_flagged(country: String) -> bool:
+	return _acct.has(country) and bool(_acct[country]["flag"])
+
 
 # Есть ли у гостя своя казна: геттер есть и отдаёт число.
 func _own_money(g: Object) -> float:
@@ -366,6 +406,10 @@ func _own_money(g: Object) -> float:
 	if (v is int or v is float) and not is_nan(float(v)) and not is_inf(float(v)):
 		return float(v)
 	return NAN
+
+
+func _cents_hash(x: float) -> int:
+	return StateHash.short(int(round(x * 100.0)))
 
 
 # Гость: сообщить хосту казну (при изменении, раз в TREASURY_REPORT_MS, а если казны нет, то чаще).
@@ -385,10 +429,11 @@ func _report_treasury(now: int) -> void:
 		return
 	_treasury_sent_ms = now
 	_treasury_last = cur
-	send(HOST_ID, MSG_TREASURY, {"have": not absent, "amount": 0.0 if absent else cur})
+	send(HOST_ID, MSG_TREASURY, {"have": not absent, "amount": 0.0 if absent else cur,
+		"dn": _deal_net, "h": _cents_hash(_deal_net), "b": _boot})
 
 
-# Хост: гость сообщил казну. Записываем; если у гостя казны нет, а у нас она записана, пересылаем.
+# Хост: гость сообщил казну. Проверяем, записываем; если у гостя казны нет, а у нас она записана, пересылаем.
 func _on_treasury_report(from_id: int, d: Dictionary) -> void:
 	var country: String = _country_of_player(from_id)
 	if country == "":
@@ -397,21 +442,84 @@ func _on_treasury_report(from_id: int, d: Dictionary) -> void:
 	if now - int(_ledger_seen_ms.get(from_id, -100000)) < TREASURY_MIN_GAP_MS:
 		return
 	_ledger_seen_ms[from_id] = now
+	var a: Dictionary = _acct_for(country)
+	if int(a["pid"]) != from_id or int(a.get("boot", -1)) != int(d.get("b", -2)):
+		# другой игрок или перезапуск его игры: итог сделок отсчитываем заново
+		a["pid"] = from_id
+		a["boot"] = int(d.get("b", -2))
+		a["has_offset"] = false
+		a["mismatch"] = 0
 	var have: bool = bool(d.get("have", false))
 	var amount = d.get("amount", 0.0)
-	if have and (amount is int or amount is float) and not is_nan(float(amount)) and not is_inf(float(amount)):
-		_ledger[country] = clampf(float(amount), -MAX_MONEY, MAX_MONEY)
+	if not have:
+		if _ledger.has(country) and now - int(_ledger_sent_ms.get(from_id, -100000)) >= TREASURY_SET_GAP_MS:
+			_ledger_sent_ms[from_id] = now
+			send(from_id, MSG_TREASURY_SET, {"amount": float(_ledger[country])})
 		return
-	if not have and _ledger.has(country) and now - int(_ledger_sent_ms.get(from_id, -100000)) >= TREASURY_SET_GAP_MS:
-		_ledger_sent_ms[from_id] = now
-		send(from_id, MSG_TREASURY_SET, {"amount": float(_ledger[country])})
+	if not _is_num(amount) or not _is_num(d.get("dn", null)):
+		_strike(from_id, country, "malformed")
+		return
+	var cur: float = clampf(float(amount), -MAX_MONEY, MAX_MONEY)
+	var dn: float = clampf(float(d["dn"]), -MAX_MONEY, MAX_MONEY)
+	# 1. итог сделок: хеш гостя совпадает с тем, что посчитал хост
+	if int(d.get("h", -1)) != _cents_hash(dn):
+		_strike(from_id, country, "bad_hash")
+		return
+	if not bool(a["has_offset"]):
+		a["offset"] = dn - float(a["net"])
+		a["has_offset"] = true
+	var expected_h: int = _cents_hash(float(a["net"]) + float(a["offset"]))
+	if _cents_hash(dn) != expected_h:
+		a["mismatch"] = int(a["mismatch"]) + 1
+		if int(a["mismatch"]) >= TREASURY_MISMATCH_TO_FLAG:
+			a["mismatch"] = 0
+			_strike(from_id, country, "deals_hash")
+		return
+	a["mismatch"] = 0
+	# 2. рост казны за вычетом сделок
+	var day: int = int(adapter.call("current_day"))
+	if not is_nan(float(a["last"])):
+		var elapsed: int = maxi(day - int(a["day"]), 0)
+		var last: float = float(a["last"])
+		var deals: float = float(a["net"]) - float(a["net_at_last"])
+		var organic: float = cur - last - deals
+		var allowed: float = (treasury_growth_floor + treasury_growth_rel * maxf(last, 0.0)) * float(elapsed) + treasury_tolerance
+		if organic > allowed:
+			_strike(from_id, country, "growth")
+			return
+	a["last"] = cur
+	a["day"] = day
+	a["net_at_last"] = float(a["net"])
+	_ledger[country] = cur
+	if bool(a["flag"]):
+		a["clean"] = int(a["clean"]) + 1
+		if int(a["clean"]) >= treasury_clean_to_clear:
+			a["flag"] = false
+			a["clean"] = 0
+			a["strikes"] = maxi(int(a["strikes"]) - 1, 0)
+
+
+func _is_num(v) -> bool:
+	return (v is int or v is float) and not is_nan(float(v)) and not is_inf(float(v))
+
+
+# Хост: нарушение. Блокируем сделки страны, при повторах отключаем игрока.
+func _strike(pid: int, country: String, kind: String) -> void:
+	var a: Dictionary = _acct_for(country)
+	a["flag"] = true
+	a["clean"] = 0
+	a["strikes"] = int(a["strikes"]) + 1
+	push_warning("[paxnet] казна %s: %s (нарушений %d)" % [country, kind, int(a["strikes"])])
+	cheat_suspected.emit(pid, country, kind)
+	if int(a["strikes"]) >= treasury_strikes_to_kick:
+		kick(pid)
 
 
 # Гость: хост переслал записанную казну. Принимается только если своей казны нет.
 func _on_treasury_set(d: Dictionary) -> void:
 	var g: Object = _game()
 	var amount = d.get("amount", null)
-	if g == null or not (amount is int or amount is float) or is_nan(float(amount)) or is_inf(float(amount)):
+	if g == null or not _is_num(amount):
 		return
 	if not is_nan(_own_money(g)) or _treasury_applied:
 		return
@@ -428,12 +536,12 @@ func _country_of_player(pid: int) -> String:
 	return ""
 
 
-# Сделка двигает казну в книге хоста (сообщения гостей потом уточнят).
-func _ledger_move(from_country: String, to_country: String, amt: float) -> void:
-	if _ledger.has(from_country):
-		_ledger[from_country] = clampf(float(_ledger[from_country]) - amt, -MAX_MONEY, MAX_MONEY)
-	if _ledger.has(to_country):
-		_ledger[to_country] = clampf(float(_ledger[to_country]) + amt, -MAX_MONEY, MAX_MONEY)
+# Подтверждённая сделка двигает итог сделок обеих сторон в книге хоста.
+func _acct_move(from_country: String, to_country: String, amt: float) -> void:
+	if from_country != "":
+		_acct_for(from_country)["net"] = clampf(float(_acct_for(from_country)["net"]) - amt, -MAX_MONEY, MAX_MONEY)
+	if to_country != "":
+		_acct_for(to_country)["net"] = clampf(float(_acct_for(to_country)["net"]) + amt, -MAX_MONEY, MAX_MONEY)
 
 
 func ledger_snapshot() -> Dictionary:
@@ -446,7 +554,7 @@ func _load_ledger(v) -> void:
 		return
 	for k in v:
 		var x = v[k]
-		if (x is int or x is float) and not is_nan(float(x)) and not is_inf(float(x)):
+		if _is_num(x):
 			_ledger[str(k)] = clampf(float(x), -MAX_MONEY, MAX_MONEY)
 
 
@@ -457,7 +565,7 @@ func _treasury_ok(g: Object, amount: float) -> bool:
 # Хватает ли казны у страны. Чужую казну хост не видит: проверяет только свою страну, остальное - отдающий у себя.
 func can_afford(country_name: String, amount: float) -> bool:
 	var g: Object = _game()
-	if g == null or amount < 0.0:
+	if g == null or amount < 0.0 or _is_flagged(country_name):
 		return false
 	if country_name != str(g.call("country")) or not g.has_method("money"):
 		return true
@@ -479,3 +587,4 @@ func _deal_here(kind: String, other: String, terms: Dictionary, giver: bool) -> 
 			var amt: float = Mailbox.deal_amount(terms)
 			if amt > 0.0 and not giver:
 				g.call("add_money", amt)
+				_deal_net += amt
