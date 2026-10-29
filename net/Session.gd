@@ -41,6 +41,11 @@ var transport: Object = null
 var adapter: Object = null
 ## Постоянный ключ игрока: по нему хост узнаёт вернувшегося (то же место, та же страна).
 var player_key: String = ""
+## Мод-потребитель (из его mod.json): хост и гость обязаны совпасть по id и версии мода.
+var app_id: String = ""
+var app_version: String = ""
+## Установленная библиотека не подходит моду (Proto.ERR_LIB_VERSION | ERR_BAD_REQUIREMENT): вход и хостинг закрыты.
+var lib_error: String = ""
 var display_name: String = ""
 ## Фабрика канала вместо ретранслятора игры (тесты, свой путь): Callable(first: Dictionary) -> Object.
 var pipe_factory: Callable = Callable()
@@ -78,11 +83,16 @@ func _host_roster_key() -> String:
 ## режим ядра (authority, external_time, push_min_ms, mods). Возврат: "" или код ошибки.
 func host(name: String, adapter_: Object = null, cfg: Dictionary = {}) -> String:
 	leave()
+	if lib_error != "":
+		_set_failed(lib_error)
+		return lib_error
 	display_name = name
 	adapter = adapter_ if adapter_ != null else BasicAdapter.new()
 	var c: Dictionary = defaults.duplicate()
 	c.merge(cfg, true)
 	var core: Dictionary = c.duplicate()
+	core["app"] = app_id
+	core["app_ver"] = app_version
 	core["name"] = str(c["room_name"]) if str(c["room_name"]) != "" else name
 	for k in ["room_name", "public", "preset", "want_code", "want_pin", "pinned"]:
 		core.erase(k)
@@ -134,11 +144,16 @@ func start() -> Dictionary:
 ## Войти по коду, «PAX-…» или ссылке. extra - что хост увидит при входе (mods - для сверки модов).
 func join(target: String, name: String, adapter_: Object = null, extra: Dictionary = {}) -> String:
 	leave()
+	if lib_error != "":
+		_set_failed(lib_error)
+		return lib_error
 	display_name = name
 	adapter = adapter_ if adapter_ != null else BasicAdapter.new()
 	session = GuestSession.new(adapter, _key(), name)
 	var info: Dictionary = {"mods": ""}
 	info.merge(extra, true)
+	info["app"] = app_id
+	info["app_ver"] = app_version
 	session.set("extra_info", info)
 	session.set("on_event", Callable(self, "_on_guest_event"))
 	session.set("on_app", Callable(self, "_on_app"))

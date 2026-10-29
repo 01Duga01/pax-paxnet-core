@@ -76,7 +76,7 @@ func room_key() -> String:
 
 
 func _info() -> Dictionary:
-	var i := {"proto": Proto.VERSION, "key": room_key(), "name": name, "has_world": _has_world and state != "syncing",
+	var i := {"proto": Proto.version, "key": room_key(), "name": name, "has_world": _has_world and state != "syncing",
 		"last_tick": tick if _has_world else -1, "core": _core}
 	i.merge(extra_info)
 	return i

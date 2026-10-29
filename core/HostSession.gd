@@ -149,8 +149,11 @@ func _admit(_endpoint, info: Dictionary, now_ms: int) -> Dictionary:
 	var key := str(info.get("key", ""))
 	if key == "" or key.length() > 64:
 		return {"ok": false, "code": Proto.ERR_CODE}
-	if int(info.get("proto", 0)) != Proto.VERSION:
+	if str(info.get("proto", "")) != Proto.version:
 		return {"ok": false, "code": Proto.ERR_VERSION}
+	# мод-потребитель (id и версия из его mod.json): у хоста и гостя должны совпасть
+	if str(cfg.get("app", "")) != "" and (str(info.get("app", "")) != str(cfg["app"]) or str(info.get("app_ver", "")) != str(cfg.get("app_ver", ""))):
+		return {"ok": false, "code": Proto.ERR_APP_VERSION}
 	if str(cfg["mods"]) != "" and str(info.get("mods", "")) != str(cfg["mods"]):
 		return {"ok": false, "code": Proto.ERR_MODS}
 	if str(cfg["code"]) != "" and str(info.get("code", "")) != str(cfg["code"]):

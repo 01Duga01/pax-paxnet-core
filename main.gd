@@ -8,6 +8,7 @@ extends PaxMod
 # нужна (mod.json: "depends": ["paxnet_core"]). Устройство и API - README.md.
 
 const PaxNetLib = preload("res://mods/paxnet_core/net/PaxNetLib.gd")
+const Proto = preload("res://mods/paxnet_core/core/Proto.gd")
 
 var lib: Node = null
 
@@ -18,6 +19,10 @@ func _mod_loaded() -> void:
 	var old: Variant = root.get_meta(PaxNetLib.META, null)
 	if old is Node and is_instance_valid(old):
 		(old as Node).queue_free()
+	# версия библиотеки (и протокола) берётся из собственного mod.json: вручную её менять в коде не нужно
+	var own: Dictionary = PaxNetLib.read_manifest(self)
+	if not own.is_empty():
+		Proto.set_version(str(own["version"]))
 	lib = PaxNetLib.new()
 	lib.name = PaxNetLib.NODE_NAME
 	lib.set("mod", self)

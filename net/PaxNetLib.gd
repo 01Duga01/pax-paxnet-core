@@ -10,7 +10,6 @@ extends Node
 #   var net: Node = lib.new_session()            # net/Session.gd: host / join / send / message
 #   var Bytes: Script = lib.script_of("Bytes")   # любой скрипт ядра по имени
 
-const VERSION: String = "1.0.0"
 const NODE_NAME: String = "PaxNetLib"
 const META: String = "paxnet_lib"
 
@@ -111,11 +110,48 @@ func _load_named(name: String) -> Script:
 	return s as Script if s is Script else null
 
 
+## {id, version, paxnet} мода по его mod.json (через безопасный API PaxMod). Пусто, если прочитать не удалось.
+static func read_manifest(m: Object) -> Dictionary:
+	if m == null or not m.has_method("load_json"):
+		return {}
+	var d: Variant = m.call("load_json", "mod.json")
+	if not (d is Dictionary):
+		return {}
+	var out: Dictionary = {}
+	out["id"] = str((d as Dictionary).get("id", ""))
+	out["version"] = str((d as Dictionary).get("version", ""))
+	out["paxnet"] = str((d as Dictionary).get("paxnet", ""))
+	return out
+
+
+## Версия библиотеки (из её mod.json). Её же сверяют хост и гость при входе.
+func version() -> String:
+	return Proto.version
+
+
 ## Новая сетевая партия. parent - куда повесить узел (по умолчанию - сюда, под /root/PaxNetLib).
 ## Ключ игрока общий для всех модов (хранится в настройках библиотеки).
-func new_session(parent: Node = null) -> Node:
+## app - PaxMod вашего мода (передайте self): id и версию библиотека читает из его mod.json сама, и при входе хост и
+## гость сверяют их: версия мода у обоих должна совпасть (иначе ошибка app_version).
+## Какая версия PaxNet Core нужна моду: поле "paxnet" в его mod.json или аргумент require (он главнее).
+## Диапазон ">=3.1.0 <4.0.0" или одна версия "3.1.1". Если установленная библиотека не подходит, host() и join()
+## этой сессии сразу возвращают "lib_version" (нет такого требования - проверки нет).
+func new_session(parent: Node = null, app: Object = null, require: String = "") -> Node:
 	var s: Node = Session.new()
 	s.set("player_key", player_key())
+	var man: Dictionary = read_manifest(app)
+	if not man.is_empty() and Proto.valid_version(str(man["version"])):
+		s.set("app_id", str(man["id"]))
+		s.set("app_version", str(man["version"]))
+	var req: String = require if require != "" else str(man.get("paxnet", ""))
+	var chk: Dictionary = Proto.check_requirement(req)
+	if Proto.version == "":
+		chk = {"ok": false, "error": Proto.ERR_LIB_VERSION}
+		push_warning("[paxnet] PaxNet Core version is unknown: mod.json of paxnet_core could not be read, sessions are disabled")
+	elif not bool(chk["ok"]):
+		push_warning("[paxnet] %s requires PaxNet Core %s, installed %s" % [str(man.get("id", "mod")), req, Proto.version])
+	if not bool(chk["ok"]):
+		s.set("lib_error", str(chk["error"]))
 	s.set("pipe_factory", pipe_factory)
 	if parent != null:
 		parent.add_child(s)

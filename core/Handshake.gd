@@ -145,11 +145,11 @@ class Listener extends RefCounted:
 		var r: Bytes.R = p["r"]
 		match int(p["type"]):
 			Proto.H_HELLO:
-				var proto := r.u8()
+				var proto := r.text()
 				var nonce_c := r.u64()
 				if not r.ok:
 					return
-				if proto != Proto.VERSION:
+				if proto != Proto.version:
 					send_to.call(endpoint, Fr.frame(Proto.H_REJECT, Bytes.W.new().text(Proto.ERR_VERSION).buf))
 					return
 				var window := now_ms / WINDOW_MS
@@ -260,7 +260,7 @@ class Dialer extends RefCounted:
 			return
 		_last = now_ms
 		if state == "hello":
-			var w := Bytes.W.new().u8(Proto.VERSION).u64(_nonce)
+			var w := Bytes.W.new().text(Proto.version).u64(_nonce)
 			while w.size() < HELLO_SIZE:
 				w.u8(0)
 			send_fn.call(Fr.frame(Proto.H_HELLO, w.buf))
