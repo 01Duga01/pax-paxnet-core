@@ -523,6 +523,8 @@ These values cap what a single guest can do, so that one guest cannot overload t
 | `max_resync_bytes` | `8192`            | The longest healing request before parsing, in bytes. |
 | `max_frag_bytes`   | `8388608` (8 MB)  | The largest message assembled from chunks. |
 | `max_roster`       | `0`               | How many distinct players the host remembers per game. 0 means `max_players * 4`, at least 16. |
+| `peer_msgs_per_s`  | `300`             | How many messages of any type per second the host accepts from one player. |
+| `peer_msgs_burst`  | `600`             | The bucket for short bursts. Above it: the link is cut. |
 
 ## What you can send
 
@@ -976,17 +978,11 @@ func add_point(player: String) -> void:
 
 ### A guest's treasury and cheat protection
 
-A guest's treasury lives on the guest, so the host does not take it on trust. The guest reports its treasury and its deal total (with a hash of the amounts rounded to cents), and the host checks:
+A guest's treasury lives on the guest, so the host does not take it on trust. The guest reports its treasury and its deal total (with a hash of the rounded amounts), and the host checks that data against its own books: the total of confirmed deals, the change of the treasury over the elapsed game days, and the integrity of the report itself. The thresholds are tuned to the game's economy and set through service properties (`treasury_*`).
 
-1. **Deal total.** The host itself knows what it debited and credited through confirmed deals. The guest's hash must match the host's. A mismatch has to repeat for three reports in a row (a report may have crossed a deal in flight), otherwise it is a `deals_hash` violation.
-2. **Treasury growth.** Excluding deals, the treasury cannot grow faster than a ceiling over the elapsed game days: `(treasury_growth_floor + treasury_growth_rel * previous treasury) * days + treasury_tolerance`. The days come from the host's world, the guest does not control them. Violation: `growth`. The first report is accepted as the baseline.
-3. **Report integrity.** The deal-total hash must match the number sent (`bad_hash`), and the fields must be numbers (`malformed`).
+A player whose treasury behaves like a modified client's is blocked: deals of their country are rejected (both as giver and as recipient), the host gets the `cheat_suspected(player_id, country, kind)` signal and a log entry. After `treasury_strikes_to_kick` (3) violations the player is disconnected. The block is lifted after `treasury_clean_to_clear` (12) honest reports in a row.
 
-A violator is blocked: deals of their country are rejected (both as giver and as recipient), the host gets the `cheat_suspected(player_id, country, kind)` signal and a log entry. After `treasury_strikes_to_kick` (3) violations the player is disconnected. The block is lifted after `treasury_clean_to_clear` (12) honest reports in a row.
-
-If a guest has no treasury (after a world reload, a rejoin, a fresh game launch), the host forwards the recorded amount. The guest accepts it only when it has no treasury of its own and only once, until its own treasury appears. The ledger is saved with the host's game.
-
-The ceilings are properties of the service (`treasury_growth_floor`, `treasury_growth_rel`, `treasury_tolerance`, `treasury_strikes_to_kick`, `treasury_clean_to_clear`). Cheating below the ceiling is invisible to this check: it catches jumps, not slow fraud.
+If a guest has no treasury (after a world reload, a rejoin, a fresh game launch), the host forwards the recorded amount. The guest accepts it only when it has no treasury of its own and only once, until its own treasury appears. The treasury ledger is saved with the host's game.
 
 ### Deals between players
 
@@ -994,7 +990,7 @@ The core mailbox (letters of kind `war`, `peace`, `alliance`, `trade`, `coruler`
 
 > **Limit of the protection.**
 >
-> A guest's treasury lives on the guest and the host does not verify it. An honest client debits and confirms. A modified client can confirm a debit that never happened. Only a treasury check on the host side would stop that (this architecture has none), so in games that need to be cheat-proof, deals between players remain trust-based.
+> The host checks a guest's treasury reports and blocks suspicious ones, but a guest's treasury lives on the guest, so in games that need full cheat protection, deals between players remain a trusted part.
 
 ## A game in the world of Pax Universe itself
 
@@ -1125,6 +1121,8 @@ Pax Universe checks every mod **before** launch and refuses to run a mod that br
 | A guest floods the host with time votes | A rate limit on time commands, at most 8 open votes, the value is coerced to a number, only players with a country vote. |
 | A guest sends huge or deeply nested structures | A size cap per message type before parsing, a parse budget by element count, nested chunks are forbidden. |
 | Many join attempts make the host do RSA | A shared RSA operation bucket, an address is refused after four failures in 10 seconds, a cap on remembered players. |
+| A flood of handshake frames or link packets from one address | A handshake-frame bucket per address and a shared one, a packet bucket per link before signature verification. The reply to HELLO is never larger than the request, so the host is useless for amplification. |
+| A player floods the host with messages of any type | A general per-player message limit (`peer_msgs_per_s`, `peer_msgs_burst`); the link is cut when exceeded. |
 | The relay mirrors a packet back to its sender | Signing and cipher keys differ per direction, so a packet returned to its sender fails verification. |
 | The relay replays old packets | A 32-bit packet number under the signature; packets older than a 32-packet window are dropped. |
 | A malicious host sends a guest a gigantic world or a section of the wrong shape | Size ceilings for transfers and the unpacked world, type checks of sections before applying. |
@@ -1141,7 +1139,7 @@ Pax Universe checks every mod **before** launch and refuses to run a mod that br
 > - **The host sees everything.** Encryption runs between a player and the host. By definition the host decrypts everything sent to it and forwards it to the others.
 > - **Guard the invite.** Anyone who saw the invite together with the PIN (for example in a public chat) can join the room as an ordinary guest.
 > - **The raw channel** (`open_pipe`, recipe 6) bypasses PaxNet encryption: protect your own protocol yourself.
-> - **A guest's treasury and client honesty.** Money and other sections of a guest's country live on the guest. A modified client can lie about its treasury: the host catches jumps (see the treasury section) but not slow fraud.
+> - **A guest's treasury and client honesty.** Money and other sections of a guest's country live on the guest. The host checks the reports about them and blocks suspicious ones, but the client side remains a trusted part.
 > - **A save file contains the PIN.** The host's save stores the room PIN so old invites keep working after a restart. The permanent player key no longer goes in. Do not publish a save while the room is still needed.
 > - **Discord.** If a mod shows the invite with the PIN in Discord status, Discord servers and everyone who sees the profile can see the PIN.
 > - **Lifetime.** RSA-1024 and AES-128 are chosen as light and sufficient for the duration of a game (hours, a day), not for years of stored recorded traffic.
@@ -1163,7 +1161,7 @@ PaxNet replaces the game's network service and opens a UDP port itself. That is 
 
 ### Security
 
-- **Link encryption:** RSA-1024 at join, AES-128-CBC and HMAC on every packet. The handshake now carries the host's public key, so the guest's first packet (`HELLO`) is padded to 400 bytes.
+- **Link encryption:** RSA-1024 at join, AES-128-CBC and HMAC on every packet. The handshake now carries the host's public key, so the guest's first packet (`HELLO`) is padded to 560 bytes.
 - **The invite PIN** protects against key swapping on the relay. An invite now looks like `CODE#PIN`; rooms without a PIN are enabled with the setting `pinned: false`.
 - **Per-room player key:** the host receives `HMAC(player key, room code)`, and seat events and the shared seat list keep only an irreversible tag.
 - **Message channel limits:** size after decompression, number window, per-guest rate and volume, healing budget. Settings: `app_*` and `resync_*`.
@@ -1171,6 +1169,7 @@ PaxNet replaces the game's network service and opens a UDP port itself. That is 
 - **Lag reports, co-ruler, time:** a player can neither stall the steps with a false report, nor take another country without an invite, nor flood votes.
 - **The link:** per-direction keys, 32-bit packet numbers, a 16-byte signature, the engine's native HMAC.
 - **A guest does not trust the host:** size ceilings and type checks for the incoming world.
+- **DoS protection:** buckets for handshake frames and link packets before signature verification, a general per-player message limit, HELLO never smaller than CHALLENGE (against amplification).
 
 ### Other
 
@@ -1212,7 +1211,7 @@ The signature is checked before decryption. The AES and signature keys are deriv
 #### Handshake
 
 ``` text
-guest → HELLO(version, nonce_c)                 padded to 400 bytes
+guest → HELLO(version, nonce_c)                 padded to 560 bytes
 host  → CHALLENGE(nonce_c, window, cookie, host RSA public key)    the guest compares its fingerprint with the PIN, otherwise it refuses
                                                 cookie = HMAC(host secret, address | nonce_c | window)
 guest → CONNECT(nonce_c, window, cookie, secret under RSA, info under the secret)
