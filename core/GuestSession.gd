@@ -12,7 +12,6 @@ const Xfer = preload("res://mods/paxnet_core/core/Xfer.gd")
 const Frag = preload("res://mods/paxnet_core/core/Frag.gd")
 const Delta = preload("res://mods/paxnet_core/core/Delta.gd")
 const AppChannel = preload("res://mods/paxnet_core/core/AppChannel.gd")
-const Hmac = preload("res://mods/paxnet_core/core/Hmac.gd")
 
 const MAX_WORLD_RAW := 256 << 20      # размер мира после распаковки, который гость готов принять от хоста
 const MAX_PATCH_RAW := 64 << 20
