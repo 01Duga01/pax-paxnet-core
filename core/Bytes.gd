@@ -5,6 +5,10 @@ extends RefCounted
 # Двоичный кодек протокола: varint, строки, значения Variant в компактном виде.
 # Свой, а не var_to_bytes: размер известен, глубина и объём ограничены (данные приходят от чужих
 # игроков), объекты и скрипты не декодируются никогда.
+#
+# Скорость: горячий путь развёрнут по месту без промежуточных вызовов (u8/varint/f64), а разбор
+# типа идёт цепочкой if, а не match: на этом движке match по typeof стоит ~0.6 мкс, цепочка if ~0.1.
+# Формат байт не меняется ни на байт.
 
 const MAX_DEPTH := 48
 ## Значение FileAccess.COMPRESSION_ZSTD: числом, чтобы код не упоминал FileAccess (песочница модов).
@@ -37,8 +41,9 @@ class W extends RefCounted:
 		return self
 
 	func u16(v: int) -> W:
-		buf.append(v & 0xFF)
-		buf.append((v >> 8) & 0xFF)
+		var n := buf.size()
+		buf.resize(n + 2)
+		buf.encode_u16(n, v & 0xFFFF)
 		return self
 
 	func u32(v: int) -> W:
@@ -95,64 +100,115 @@ class W extends RefCounted:
 
 	func variant(v, depth: int = 0) -> W:
 		if depth >= MAX_DEPTH:
-			u8(T_NIL)
+			buf.append(T_NIL)
 			return self
-		match typeof(v):
-			TYPE_NIL:
-				u8(T_NIL)
-			TYPE_BOOL:
-				u8(T_TRUE if v else T_FALSE)
-			TYPE_INT:
-				u8(T_INT)
-				svarint(v)
-			TYPE_FLOAT:
-				u8(T_FLOAT)
-				f64(v)
-			TYPE_STRING, TYPE_STRING_NAME:
-				u8(T_STR)
-				text(String(v))
-			TYPE_PACKED_BYTE_ARRAY:
-				u8(T_BYTES)
-				bytes(v)
-			TYPE_ARRAY:
-				u8(T_ARRAY)
-				varint((v as Array).size())
-				for e in v:
-					variant(e, depth + 1)
-			TYPE_PACKED_INT32_ARRAY, TYPE_PACKED_INT64_ARRAY, TYPE_PACKED_STRING_ARRAY, \
-			TYPE_PACKED_FLOAT32_ARRAY, TYPE_PACKED_FLOAT64_ARRAY:
-				u8(T_ARRAY)
-				varint(v.size())
-				for e in v:
-					variant(e, depth + 1)
-			TYPE_DICTIONARY:
-				u8(T_DICT)
-				varint((v as Dictionary).size())
-				for k in v:
-					variant(k, depth + 1)
-					variant(v[k], depth + 1)
-			TYPE_VECTOR2:
-				u8(T_V2)
-				f32(v.x)
-				f32(v.y)
-			TYPE_VECTOR3:
-				u8(T_V3)
-				f32(v.x)
-				f32(v.y)
-				f32(v.z)
-			TYPE_COLOR:
-				u8(T_COLOR)
-				f32(v.r)
-				f32(v.g)
-				f32(v.b)
-				f32(v.a)
-			TYPE_VECTOR2I:
-				u8(T_V2I)
-				svarint(v.x)
-				svarint(v.y)
-			_:
-				u8(T_NIL)   # объекты, вызовы, узлы по сети не ходят
+		var t := typeof(v)
+		if t == TYPE_INT:
+			buf.append(T_INT)
+			var x: int = v
+			if x < 0:                       # зигзаг, как в svarint(); переполнение — ноль
+				x = ((-x - 1) << 1) | 1
+			else:
+				x = x << 1
+			if x < 0:
+				x = 0
+			while x >= 0x80:
+				buf.append((x & 0x7F) | 0x80)
+				x >>= 7
+			buf.append(x)
+		elif t == TYPE_STRING:
+			buf.append(T_STR)
+			var b := (v as String).to_utf8_buffer()
+			var n := b.size()
+			while n >= 0x80:
+				buf.append((n & 0x7F) | 0x80)
+				n >>= 7
+			buf.append(n)
+			buf.append_array(b)
+		elif t == TYPE_FLOAT:
+			var n := buf.size()
+			buf.resize(n + 9)
+			buf[n] = T_FLOAT
+			buf.encode_double(n + 1, v)
+		elif t == TYPE_DICTIONARY:
+			buf.append(T_DICT)
+			var d: Dictionary = v
+			varint(d.size())
+			for k in d:
+				variant(k, depth + 1)
+				variant(d[k], depth + 1)
+		elif t == TYPE_ARRAY:
+			buf.append(T_ARRAY)
+			var a: Array = v
+			varint(a.size())
+			for e in a:
+				variant(e, depth + 1)
+		elif t == TYPE_BOOL:
+			buf.append(T_TRUE if v else T_FALSE)
+		elif t == TYPE_NIL:
+			buf.append(T_NIL)
+		elif t == TYPE_STRING_NAME:
+			buf.append(T_STR)
+			var b2 := String(v).to_utf8_buffer()
+			var n2 := b2.size()
+			while n2 >= 0x80:
+				buf.append((n2 & 0x7F) | 0x80)
+				n2 >>= 7
+			buf.append(n2)
+			buf.append_array(b2)
+		elif t == TYPE_PACKED_BYTE_ARRAY:
+			buf.append(T_BYTES)
+			var bb: PackedByteArray = v
+			varint(bb.size())
+			buf.append_array(bb)
+		elif t == TYPE_VECTOR2:
+			var n := buf.size()
+			buf.resize(n + 9)
+			buf[n] = T_V2
+			buf.encode_float(n + 1, v.x)
+			buf.encode_float(n + 5, v.y)
+		elif t == TYPE_VECTOR3:
+			var n := buf.size()
+			buf.resize(n + 13)
+			buf[n] = T_V3
+			buf.encode_float(n + 1, v.x)
+			buf.encode_float(n + 5, v.y)
+			buf.encode_float(n + 9, v.z)
+		elif t == TYPE_COLOR:
+			var n := buf.size()
+			buf.resize(n + 17)
+			buf[n] = T_COLOR
+			buf.encode_float(n + 1, v.r)
+			buf.encode_float(n + 5, v.g)
+			buf.encode_float(n + 9, v.b)
+			buf.encode_float(n + 13, v.a)
+		elif t == TYPE_PACKED_INT32_ARRAY or t == TYPE_PACKED_INT64_ARRAY \
+				or t == TYPE_PACKED_STRING_ARRAY or t == TYPE_PACKED_FLOAT32_ARRAY \
+				or t == TYPE_PACKED_FLOAT64_ARRAY:
+			buf.append(T_ARRAY)
+			varint(v.size())
+			for e in v:
+				variant(e, depth + 1)
+		elif t == TYPE_VECTOR2I:
+			buf.append(T_V2I)
+			_v2i_field(v.x)
+			_v2i_field(v.y)
+		else:
+			buf.append(T_NIL)   # объекты, вызовы, узлы по сети не ходят
 		return self
+
+	# Одно поле Vector2i: зигзаг + varint.
+	func _v2i_field(x: int) -> void:
+		if x < 0:
+			x = ((-x - 1) << 1) | 1
+		else:
+			x = x << 1
+		if x < 0:
+			x = 0
+		while x >= 0x80:
+			buf.append((x & 0x7F) | 0x80)
+			x >>= 7
+		buf.append(x)
 
 
 class R extends RefCounted:
@@ -160,69 +216,86 @@ class R extends RefCounted:
 	var pos := 0
 	var ok := true
 	var nodes_left := -1            # бюджет разбора значений; -1 - без предела
+	var _size := 0                  # buf.size() кэширован: горячий цикл не дёргает движок
 
 	func _init(b: PackedByteArray = PackedByteArray(), start: int = 0) -> void:
 		buf = b
 		pos = start
+		_size = b.size()
 
 	func left() -> int:
-		return buf.size() - pos
+		return _size - pos
 
 	func _need(n: int) -> bool:
-		if n < 0 or pos + n > buf.size():
+		if n < 0 or pos + n > _size:
 			ok = false
 			return false
 		return true
 
 	func u8() -> int:
-		if not _need(1):
+		if pos >= _size:
+			ok = false
 			return 0
+		var v: int = buf[pos]
 		pos += 1
-		return buf[pos - 1]
+		return v
 
 	func u16() -> int:
-		if not _need(2):
+		if pos + 2 > _size:
+			ok = false
 			return 0
+		var v: int = buf[pos] | (buf[pos + 1] << 8)
 		pos += 2
-		return buf[pos - 2] | (buf[pos - 1] << 8)
+		return v
 
 	func u32() -> int:
-		if not _need(4):
+		if pos + 4 > _size:
+			ok = false
 			return 0
+		var v: int = buf.decode_u32(pos)
 		pos += 4
-		return buf.decode_u32(pos - 4)
+		return v
 
 	func u64() -> int:
-		if not _need(8):
+		if pos + 8 > _size:
+			ok = false
 			return 0
+		var v: int = buf.decode_s64(pos)
 		pos += 8
-		return buf.decode_s64(pos - 8)
+		return v
 
 	func f32() -> float:
-		if not _need(4):
+		if pos + 4 > _size:
+			ok = false
 			return 0.0
+		var v: float = buf.decode_float(pos)
 		pos += 4
-		return buf.decode_float(pos - 4)
+		return v
 
 	func f64() -> float:
-		if not _need(8):
+		if pos + 8 > _size:
+			ok = false
 			return 0.0
+		var v: float = buf.decode_double(pos)
 		pos += 8
-		return buf.decode_double(pos - 8)
+		return v
 
 	func varint() -> int:
 		var v := 0
 		var shift := 0
+		var p := pos
 		while true:
-			if not _need(1) or shift > 63:
+			if p >= _size or shift > 63:
 				ok = false
+				pos = p
 				return 0
-			var b: int = buf[pos]
-			pos += 1
+			var b: int = buf[p]
+			p += 1
 			v |= (b & 0x7F) << shift
 			if b < 0x80:
 				break
 			shift += 7
+		pos = p
 		return v
 
 	func svarint() -> int:
@@ -251,28 +324,32 @@ class R extends RefCounted:
 		return b
 
 	# Допустимый UTF-8 без изысков: чужие байты не должны сыпать ошибки в журнал движка.
+	# Развёрнуто по длине последовательности: range() в цикле стоит дороже самих проверок.
 	static func _valid_utf8(b: PackedByteArray) -> bool:
-		var i := 0
 		var n := b.size()
+		var i := 0
 		while i < n:
 			var c: int = b[i]
-			var extra := 0
 			if c < 0x80:
-				extra = 0
-			elif c >= 0xC2 and c < 0xE0:
-				extra = 1
-			elif c >= 0xE0 and c < 0xF0:
-				extra = 2
-			elif c >= 0xF0 and c < 0xF5:
-				extra = 3
+				i += 1
+				continue
+			if c < 0xC2:
+				return false
+			if c < 0xE0:
+				if i + 2 > n or (b[i + 1] & 0xC0) != 0x80:
+					return false
+				i += 2
+			elif c < 0xF0:
+				if i + 3 > n or (b[i + 1] & 0xC0) != 0x80 or (b[i + 2] & 0xC0) != 0x80:
+					return false
+				i += 3
+			elif c < 0xF5:
+				if i + 4 > n or (b[i + 1] & 0xC0) != 0x80 or (b[i + 2] & 0xC0) != 0x80 \
+						or (b[i + 3] & 0xC0) != 0x80:
+					return false
+				i += 4
 			else:
 				return false
-			if i + extra > n - 1:
-				return false
-			for k in range(1, extra + 1):
-				if (b[i + k] & 0xC0) != 0x80:
-					return false
-			i += extra + 1
 		return true
 
 	func raw_n(n: int) -> PackedByteArray:
@@ -284,7 +361,7 @@ class R extends RefCounted:
 
 	func rest() -> PackedByteArray:
 		var b := buf.slice(pos)
-		pos = buf.size()
+		pos = _size
 		return b
 
 	func variant(depth: int = 0):
@@ -296,58 +373,174 @@ class R extends RefCounted:
 			if nodes_left < 0:
 				ok = false
 				return null
-		var t := u8()
-		if not ok:
+		var p := pos
+		if p >= _size:
+			ok = false
 			return null
-		match t:
-			T_NIL:
+		var t: int = buf[p]
+		p += 1
+		if t == T_INT:
+			# varint + зигзаг без вызова svarint()
+			var v := 0
+			var shift := 0
+			while true:
+				if p >= _size or shift > 63:
+					ok = false
+					pos = p
+					return 0
+				var b: int = buf[p]
+				p += 1
+				v |= (b & 0x7F) << shift
+				if b < 0x80:
+					break
+				shift += 7
+			pos = p
+			if v & 1:
+				return -((v >> 1) & 0x3FFFFFFFFFFFFFFF) - 1
+			return (v >> 1) & 0x3FFFFFFFFFFFFFFF
+		if t == T_STR:
+			# varint + slice + проверка + сборка String одним куском, без вызовов text()/varint()
+			var n := 0
+			var shift := 0
+			while true:
+				if p >= _size or shift > 63:
+					ok = false
+					pos = p
+					return ""
+				var bb: int = buf[p]
+				p += 1
+				n |= (bb & 0x7F) << shift
+				if bb < 0x80:
+					break
+				shift += 7
+			if n < 0 or p + n > _size:
+				ok = false
+				pos = p
+				return ""
+			var raw := buf.slice(p, p + n)
+			p += n
+			pos = p
+			if not _valid_utf8(raw):
+				ok = false
+				return ""
+			return raw.get_string_from_utf8()
+		if t == T_NIL:
+			pos = p
+			return null
+		if t == T_DICT:
+			pos = p
+			var n2 := varint()
+			if n2 * 2 > left():
+				ok = false
 				return null
-			T_FALSE:
-				return false
-			T_TRUE:
-				return true
-			T_INT:
-				return svarint()
-			T_FLOAT:
-				return f64()
-			T_STR:
-				return text()
-			T_BYTES:
-				return bytes()
-			T_ARRAY:
-				var n := varint()
-				if n > left():   # каждый элемент — минимум байт: защита от выдуманных длин
-					ok = false
+			var d := {}
+			for i in n2:
+				var k = variant(depth + 1)
+				var val = variant(depth + 1)
+				if not ok:
 					return null
-				var a := []
-				a.resize(n)
-				for i in n:
-					a[i] = variant(depth + 1)
-					if not ok:
-						return null
-				return a
-			T_DICT:
-				var n2 := varint()
-				if n2 * 2 > left():
-					ok = false
+				d[k] = val
+			return d
+		if t == T_ARRAY:
+			pos = p
+			var n := varint()
+			if n > left():   # каждый элемент — минимум байт: защита от выдуманных длин
+				ok = false
+				return null
+			var a := []
+			a.resize(n)
+			for i in n:
+				a[i] = variant(depth + 1)
+				if not ok:
 					return null
-				var d := {}
-				for i in n2:
-					var k = variant(depth + 1)
-					var v = variant(depth + 1)
-					if not ok:
-						return null
-					d[k] = v
-				return d
-			T_V2:
-				return Vector2(f32(), f32())
-			T_V3:
-				return Vector3(f32(), f32(), f32())
-			T_COLOR:
-				return Color(f32(), f32(), f32(), f32())
-			T_V2I:
-				return Vector2i(svarint(), svarint())
+			return a
+		if t == T_FLOAT:
+			if p + 8 > _size:
+				ok = false
+				pos = p
+				return 0.0
+			var f: float = buf.decode_double(p)
+			pos = p + 8
+			return f
+		if t == T_TRUE:
+			pos = p
+			return true
+		if t == T_FALSE:
+			pos = p
+			return false
+		if t == T_BYTES:
+			pos = p
+			return bytes()
+		if t == T_V2:
+			var x := 0.0
+			var y := 0.0
+			if p + 4 <= _size:
+				x = buf.decode_float(p)
+				p += 4
+				if p + 4 <= _size:
+					y = buf.decode_float(p)
+					p += 4
+				else:
+					ok = false
+			else:
+				ok = false
+			pos = p
+			return Vector2(x, y)
+		if t == T_V3:
+			var x3 := 0.0
+			var y3 := 0.0
+			var z3 := 0.0
+			if p + 4 <= _size:
+				x3 = buf.decode_float(p)
+				p += 4
+				if p + 4 <= _size:
+					y3 = buf.decode_float(p)
+					p += 4
+					if p + 4 <= _size:
+						z3 = buf.decode_float(p)
+						p += 4
+					else:
+						ok = false
+				else:
+					ok = false
+			else:
+				ok = false
+			pos = p
+			return Vector3(x3, y3, z3)
+		if t == T_COLOR:
+			var r := 0.0
+			var g := 0.0
+			var bl := 0.0
+			var al := 0.0
+			if p + 4 <= _size:
+				r = buf.decode_float(p)
+				p += 4
+				if p + 4 <= _size:
+					g = buf.decode_float(p)
+					p += 4
+					if p + 4 <= _size:
+						bl = buf.decode_float(p)
+						p += 4
+						if p + 4 <= _size:
+							al = buf.decode_float(p)
+							p += 4
+						else:
+							ok = false
+					else:
+						ok = false
+				else:
+					ok = false
+			else:
+				ok = false
+			pos = p
+			return Color(r, g, bl, al)
+		if t == T_V2I:
+			pos = p
+			var ax := svarint()
+			var ay := svarint()
+			return Vector2i(ax, ay)
 		ok = false
+		pos = p
 		return null
 
 
